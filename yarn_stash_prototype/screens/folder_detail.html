@@ -2,7 +2,7 @@
 <html lang="en"><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>Folder Detail - Yarn Stash</title><script src="https://cdn.tailwindcss.com"></script><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" /><link rel="stylesheet" href="../assets/styles.css" /></head><body class="flex items-center justify-center"><div class="phone-shell"><main class="phone-screen">
 <div class="status-bar"><span>9:41</span><div class="status-icons"><i class="fa-solid fa-signal"></i><i class="fa-solid fa-wifi"></i><i class="fa-solid fa-battery-full"></i></div></div>
 <section class="app-content no-tab"><div class="scroll">
- <div class="nav-row"><button class="icon-btn"><i class="fa-solid fa-chevron-left"></i></button><button class="icon-btn"><i class="fa-solid fa-ellipsis"></i></button></div>
+ <div class="nav-row"><button class="icon-btn"><i class="fa-solid fa-chevron-left"></i></button><button id="open-folder-edit" class="icon-btn" aria-label="Edit folder"><i class="fa-solid fa-pen"></i></button></div>
  <div class="mt-5 folder-card"><div class="w-14 h-14 rounded-2xl bg-[#f6d9cd] flex items-center justify-center"><i class="fa-solid fa-shirt text-[#814734] text-xl"></i></div><h1 class="nav-title mt-5">Sweaters</h1><p class="text-[#8b7d72] font-semibold mt-2">24 yarns · 9,240 yards available</p></div>
  <div class="mt-5 search-box"><i class="fa-solid fa-magnifying-glass"></i><span class="font-semibold">Search in Sweaters</span></div>
  <div class="mt-4 space-y-3">
@@ -11,4 +11,69 @@
   <article class="yarn-card"><img class="yarn-img" src="https://source.unsplash.com/442x442/?cream,wool" alt="cream yarn"><div class="flex-1"><h3 class="font-black">Woolfolk Far</h3><p class="text-sm font-bold text-[#8b7d72]">Oat · 8 balls</p><p class="mt-2 text-sm font-semibold">1,136 yd total</p></div><i class="fa-solid fa-chevron-right text-[#8b7d72] mt-7"></i></article>
  </div>
 </div></section>
+<div id="folder-edit-modal" class="absolute inset-0 z-20 hidden" aria-hidden="true">
+ <button id="folder-edit-backdrop" class="absolute inset-0 bg-[#2c241e]/35" aria-label="Close folder editor"></button>
+ <section class="card absolute left-4 right-4 top-1/2 -translate-y-1/2 p-4" role="dialog" aria-modal="true" aria-labelledby="folder-edit-title">
+  <div class="flex items-center justify-between gap-3">
+   <h2 id="folder-edit-title" class="text-lg font-black">Edit folder</h2>
+   <button id="close-folder-edit" class="icon-btn w-9 h-9" type="button" aria-label="Close folder editor"><i class="fa-solid fa-xmark"></i></button>
+  </div>
+  <form id="folder-edit-form" class="mt-4">
+   <label class="field block" for="folder-name-input"><span class="field-label">Name</span><input id="folder-name-input" class="auth-input" type="text" value="Sweaters" /></label>
+   <div class="mt-4">
+    <div class="field-label">Icon</div>
+    <div class="grid grid-cols-4 gap-2 mt-2">
+     <button class="h-12 rounded-[16px] border-2 border-[#814734] bg-[#fff7ed] text-[#814734]" type="button" aria-label="Shirt icon"><i class="fa-solid fa-shirt"></i></button>
+     <button class="h-12 rounded-[16px] border border-[#ece2d8] bg-white text-[#8b7d72]" type="button" aria-label="Socks icon"><i class="fa-solid fa-socks"></i></button>
+     <button class="h-12 rounded-[16px] border border-[#ece2d8] bg-white text-[#8b7d72]" type="button" aria-label="Sun icon"><i class="fa-solid fa-sun"></i></button>
+     <button class="h-12 rounded-[16px] border border-[#ece2d8] bg-white text-[#8b7d72]" type="button" aria-label="Box icon"><i class="fa-solid fa-box-archive"></i></button>
+    </div>
+   </div>
+   <div class="mt-4">
+    <div class="field-label">Icon color</div>
+    <div class="grid grid-cols-5 gap-2 mt-2">
+     <button class="h-10 rounded-[14px] border-2 border-[#814734] bg-[#f6d9cd]" type="button" aria-label="Rose color"></button>
+     <button class="h-10 rounded-[14px] border border-[#ece2d8] bg-[#dce7d7]" type="button" aria-label="Sage color"></button>
+     <button class="h-10 rounded-[14px] border border-[#ece2d8] bg-[#f7e7c6]" type="button" aria-label="Gold color"></button>
+     <button class="h-10 rounded-[14px] border border-[#ece2d8] bg-[#e7ddf6]" type="button" aria-label="Lavender color"></button>
+     <button class="h-10 rounded-[14px] border border-[#ece2d8] bg-[#eadfd5]" type="button" aria-label="Taupe color"></button>
+    </div>
+   </div>
+   <div class="grid grid-cols-2 gap-3 mt-5">
+    <button id="cancel-folder-edit" class="secondary-btn" type="button">Cancel</button>
+    <button class="primary-btn h-12" type="submit">Save</button>
+   </div>
+  </form>
+ </section>
+</div>
+<script>
+ const folderEditModal = document.getElementById('folder-edit-modal');
+ const folderNameInput = document.getElementById('folder-name-input');
+ const folderTitle = document.querySelector('.folder-card .nav-title');
+ const folderSearchLabel = document.querySelector('.search-box span');
+ const openFolderEdit = () => {
+  folderNameInput.value = folderTitle.textContent.trim();
+  folderEditModal.classList.remove('hidden');
+  folderEditModal.setAttribute('aria-hidden', 'false');
+  folderNameInput.focus();
+ };
+ const closeFolderEdit = () => {
+  folderEditModal.classList.add('hidden');
+  folderEditModal.setAttribute('aria-hidden', 'true');
+ };
+ document.getElementById('open-folder-edit').addEventListener('click', openFolderEdit);
+ document.getElementById('folder-edit-backdrop').addEventListener('click', closeFolderEdit);
+ document.getElementById('close-folder-edit').addEventListener('click', closeFolderEdit);
+ document.getElementById('cancel-folder-edit').addEventListener('click', closeFolderEdit);
+ document.getElementById('folder-edit-form').addEventListener('submit', (event) => {
+  event.preventDefault();
+  const folderName = folderNameInput.value.trim() || 'Untitled folder';
+  folderTitle.textContent = folderName;
+  folderSearchLabel.textContent = `Search in ${folderName}`;
+  closeFolderEdit();
+ });
+ document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && !folderEditModal.classList.contains('hidden')) closeFolderEdit();
+ });
+</script>
 </main></div></body></html>

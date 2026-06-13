@@ -5,16 +5,116 @@
  <div class="nav-row"><button class="icon-btn"><i class="fa-solid fa-chevron-left"></i></button></div>
  <h1 class="nav-title mt-4">Settings</h1>
  <div class="card p-2 mt-5">
-  <div class="flex items-center gap-4 p-4 border-b border-[#ece2d8]"><div class="w-10 h-10 rounded-2xl bg-[#f6d9cd] flex items-center justify-center"><i class="fa-solid fa-user text-[#814734]"></i></div><div class="flex-1"><h3 class="font-black">Account</h3><p class="text-sm font-bold text-[#8b7d72]">Email, password, profile</p></div><i class="fa-solid fa-chevron-right text-[#8b7d72]"></i></div>
-  <div class="flex items-center gap-4 p-4 border-b border-[#ece2d8]"><div class="w-10 h-10 rounded-2xl bg-[#dce7d7] flex items-center justify-center"><i class="fa-solid fa-cloud-arrow-up text-[#587456]"></i></div><div class="flex-1"><h3 class="font-black">Backup & sync</h3><p class="text-sm font-bold text-[#8b7d72]">Private app collection data</p></div><span class="text-sm font-black text-[#8fa58b]">On</span></div>
-  <div class="flex items-center gap-4 p-4"><div class="w-10 h-10 rounded-2xl bg-[#f7e7c6] flex items-center justify-center"><i class="fa-solid fa-bell text-[#a87523]"></i></div><div class="flex-1"><h3 class="font-black">Notifications</h3><p class="text-sm font-bold text-[#8b7d72]">Low stock, project reminders</p></div><i class="fa-solid fa-chevron-right text-[#8b7d72]"></i></div>
+  <button id="open-account-settings" class="flex items-center gap-4 p-4 w-full text-left" type="button"><div class="w-10 h-10 rounded-2xl bg-[#f6d9cd] flex items-center justify-center"><i class="fa-solid fa-user text-[#814734]"></i></div><div class="flex-1"><h3 class="font-black">Account</h3><p id="account-summary" class="text-sm font-bold text-[#8b7d72]">Email, password, profile</p></div><i class="fa-solid fa-chevron-right text-[#8b7d72]"></i></button>
  </div>
- <h2 class="text-lg font-black mt-6">Catalog preferences</h2>
+ <h2 class="text-lg font-black mt-6">Stash preferences</h2>
  <div class="card p-2 mt-3">
-  <div class="flex items-center gap-4 p-4 border-b border-[#ece2d8]"><div class="flex-1"><h3 class="font-black">Default units</h3><p class="text-sm font-bold text-[#8b7d72]">Yards · Grams</p></div><i class="fa-solid fa-chevron-right text-[#8b7d72]"></i></div>
-  <div class="flex items-center gap-4 p-4 border-b border-[#ece2d8]"><div class="flex-1"><h3 class="font-black">Autofill catalog data</h3><p class="text-sm font-bold text-[#8b7d72]">Fiber, weight, yardage</p></div><span class="text-sm font-black text-[#8fa58b]">On</span></div>
-  <div class="flex items-center gap-4 p-4"><div class="flex-1"><h3 class="font-black">Export stash</h3><p class="text-sm font-bold text-[#8b7d72]">CSV for spreadsheets</p></div><i class="fa-solid fa-download text-[#b66f54]"></i></div>
+  <button id="open-unit-settings" class="flex items-center gap-4 p-4 w-full text-left" type="button"><div class="flex-1"><h3 class="font-black">Default units</h3><p id="unit-summary" class="text-sm font-bold text-[#8b7d72]">Yards / Grams</p></div><i class="fa-solid fa-chevron-right text-[#8b7d72]"></i></button>
  </div>
  <a class="secondary-btn w-full mt-6 text-[#b0453b]" href="login.html">Sign out</a>
 </div></section>
+<div id="account-settings-modal" class="absolute inset-0 z-20 hidden" aria-hidden="true">
+ <button class="settings-backdrop absolute inset-0 bg-[#2c241e]/35" type="button" aria-label="Close account settings"></button>
+ <section class="card absolute left-4 right-4 top-1/2 -translate-y-1/2 p-4" role="dialog" aria-modal="true" aria-labelledby="account-settings-title">
+  <div class="flex items-center justify-between gap-3">
+   <h2 id="account-settings-title" class="text-lg font-black">Account</h2>
+   <button class="close-settings-modal icon-btn w-9 h-9" type="button" aria-label="Close account settings"><i class="fa-solid fa-xmark"></i></button>
+  </div>
+  <form id="account-settings-form" class="mt-4 space-y-3">
+   <label class="field block" for="username-input"><span class="field-label">Username</span><input id="username-input" class="auth-input" type="text" value="Sarah Liu" /></label>
+   <label class="field block" for="email-input"><span class="field-label">Email</span><input id="email-input" class="auth-input" type="email" value="sarah@example.com" /></label>
+   <button class="secondary-btn w-full" type="button"><i class="fa-solid fa-key"></i>Reset password</button>
+   <div class="grid grid-cols-2 gap-3 pt-2">
+    <button class="cancel-settings-modal secondary-btn" type="button">Cancel</button>
+    <button class="primary-btn h-12" type="submit">Save</button>
+   </div>
+  </form>
+ </section>
+</div>
+<div id="unit-settings-modal" class="absolute inset-0 z-20 hidden" aria-hidden="true">
+ <button class="settings-backdrop absolute inset-0 bg-[#2c241e]/35" type="button" aria-label="Close unit settings"></button>
+ <section class="card absolute left-4 right-4 top-1/2 -translate-y-1/2 p-4" role="dialog" aria-modal="true" aria-labelledby="unit-settings-title">
+  <div class="flex items-center justify-between gap-3">
+   <h2 id="unit-settings-title" class="text-lg font-black">Default units</h2>
+   <button class="close-settings-modal icon-btn w-9 h-9" type="button" aria-label="Close unit settings"><i class="fa-solid fa-xmark"></i></button>
+  </div>
+  <form id="unit-settings-form" class="mt-4">
+   <div>
+    <div class="field-label">Length</div>
+    <div class="grid grid-cols-2 gap-2 mt-2">
+     <button class="unit-choice h-12 rounded-[16px] border-2 border-[#814734] bg-[#fff7ed] font-black text-[#814734]" type="button" data-unit-group="length" data-unit-value="Yards">Yards</button>
+     <button class="unit-choice h-12 rounded-[16px] border border-[#ece2d8] bg-white font-black text-[#8b7d72]" type="button" data-unit-group="length" data-unit-value="Meters">Meters</button>
+    </div>
+   </div>
+   <div class="mt-4">
+    <div class="field-label">Weight</div>
+    <div class="grid grid-cols-2 gap-2 mt-2">
+     <button class="unit-choice h-12 rounded-[16px] border-2 border-[#814734] bg-[#fff7ed] font-black text-[#814734]" type="button" data-unit-group="weight" data-unit-value="Grams">Grams</button>
+     <button class="unit-choice h-12 rounded-[16px] border border-[#ece2d8] bg-white font-black text-[#8b7d72]" type="button" data-unit-group="weight" data-unit-value="Ounces">Ounces</button>
+    </div>
+   </div>
+   <div class="grid grid-cols-2 gap-3 mt-5">
+    <button class="cancel-settings-modal secondary-btn" type="button">Cancel</button>
+    <button class="primary-btn h-12" type="submit">Save</button>
+   </div>
+  </form>
+ </section>
+</div>
+<script>
+ const accountModal = document.getElementById('account-settings-modal');
+ const unitModal = document.getElementById('unit-settings-modal');
+ const accountSummary = document.getElementById('account-summary');
+ const unitSummary = document.getElementById('unit-summary');
+ const usernameInput = document.getElementById('username-input');
+ const emailInput = document.getElementById('email-input');
+ const selectedUnits = { length: 'Yards', weight: 'Grams' };
+ const openSettingsModal = (modal) => {
+  modal.classList.remove('hidden');
+  modal.setAttribute('aria-hidden', 'false');
+ };
+ const closeSettingsModals = () => {
+  [accountModal, unitModal].forEach((modal) => {
+   modal.classList.add('hidden');
+   modal.setAttribute('aria-hidden', 'true');
+  });
+ };
+ const markUnitChoice = (button) => {
+  const group = button.dataset.unitGroup;
+  selectedUnits[group] = button.dataset.unitValue;
+  document.querySelectorAll(`[data-unit-group="${group}"]`).forEach((choice) => {
+   choice.classList.toggle('border-2', choice === button);
+   choice.classList.toggle('border-[#814734]', choice === button);
+   choice.classList.toggle('bg-[#fff7ed]', choice === button);
+   choice.classList.toggle('text-[#814734]', choice === button);
+   choice.classList.toggle('border', choice !== button);
+   choice.classList.toggle('border-[#ece2d8]', choice !== button);
+   choice.classList.toggle('bg-white', choice !== button);
+   choice.classList.toggle('text-[#8b7d72]', choice !== button);
+  });
+ };
+ document.getElementById('open-account-settings').addEventListener('click', () => {
+  openSettingsModal(accountModal);
+  usernameInput.focus();
+ });
+ document.getElementById('open-unit-settings').addEventListener('click', () => openSettingsModal(unitModal));
+ document.querySelectorAll('.settings-backdrop, .close-settings-modal, .cancel-settings-modal').forEach((button) => {
+  button.addEventListener('click', closeSettingsModals);
+ });
+ document.querySelectorAll('.unit-choice').forEach((button) => {
+  button.addEventListener('click', () => markUnitChoice(button));
+ });
+ document.getElementById('account-settings-form').addEventListener('submit', (event) => {
+  event.preventDefault();
+  accountSummary.textContent = `${usernameInput.value.trim() || 'Sarah Liu'} / ${emailInput.value.trim() || 'sarah@example.com'}`;
+  closeSettingsModals();
+ });
+ document.getElementById('unit-settings-form').addEventListener('submit', (event) => {
+  event.preventDefault();
+  unitSummary.textContent = `${selectedUnits.length} / ${selectedUnits.weight}`;
+  closeSettingsModals();
+ });
+ document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') closeSettingsModals();
+ });
+</script>
 </main></div></body></html>
