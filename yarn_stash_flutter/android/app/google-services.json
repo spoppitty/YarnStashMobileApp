@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "939927765385",
+    "project_id": "yarnstashmobileapp",
+    "storage_bucket": "yarnstashmobileapp.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:939927765385:android:583aa4f47c6e5bbd026158",
+        "android_client_info": {
+          "package_name": "com.yarnstash.yarn_stash"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBz3EQFfDrpk9j9kx1hzFVKD1kjGhsXryk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
