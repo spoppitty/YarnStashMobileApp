@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 
@@ -33,11 +35,126 @@ const _detailFields = <InfoItem>[
   InfoItem('Price', r'$14.50'),
 ];
 
+const _allStashFilter = 'All';
+const _stashWeightFilters = ['Worsted', 'Sock'];
+const _stashFiberFilters = ['Merino', 'Wool', 'Cotton'];
+const _stashStatusFilters = ['In stash', 'Used up'];
+const _colorFamilyOptions = [
+  'White',
+  'Red',
+  'Orange',
+  'Yellow',
+  'Green',
+  'Blue',
+  'Purple',
+  'Pink',
+  'Brown',
+  'Black',
+  'Grey',
+  'Multicolor',
+];
+const _stashFilterOrder = [
+  ..._stashWeightFilters,
+  ..._stashFiberFilters,
+  ..._colorFamilyOptions,
+  ..._stashStatusFilters,
+];
+
+const _stashItems = <_StashYarnItem>[
+  _StashYarnItem(
+    imageUrl: _imgBlueYarn,
+    title: 'Malabrigo Rios',
+    subtitle: 'Aguas - 4 balls',
+    fallbackColor: Color(0xFFB8D6E8),
+    filters: {'Worsted', 'Merino', 'Blue', 'In stash'},
+    recentlyAddedRank: 1,
+    priceCents: 1450,
+    amountOwned: 4,
+  ),
+  _StashYarnItem(
+    imageUrl: _imgPinkYarn,
+    title: 'Tosh Merino Light',
+    subtitle: 'Antler - 2 skeins',
+    fallbackColor: AppColors.rose,
+    filters: {'Sock', 'Merino', 'White', 'In stash'},
+    recentlyAddedRank: 2,
+    priceCents: 3150,
+    amountOwned: 2,
+  ),
+  _StashYarnItem(
+    imageUrl: _imgGreenYarn,
+    title: 'Cascade 220',
+    subtitle: 'Sage - 7 balls',
+    fallbackColor: AppColors.sageSoft,
+    filters: {'Worsted', 'Wool', 'Green', 'In stash'},
+    recentlyAddedRank: 3,
+    priceCents: 1199,
+    amountOwned: 7,
+  ),
+  _StashYarnItem(
+    imageUrl: _imgCreamYarn,
+    title: 'Cotton Pure',
+    subtitle: 'Heirloom - 6 balls',
+    fallbackColor: AppColors.cream,
+    filters: {'Cotton', 'White', 'Used up'},
+    recentlyAddedRank: 4,
+    priceCents: 850,
+    amountOwned: 6,
+  ),
+];
+
+enum _StashSort { recentlyAdded, price, amountOwned }
+
+enum _StashSortDirection { ascending, descending }
+
+String _stashSortLabel(_StashSort sort) => switch (sort) {
+  _StashSort.recentlyAdded => 'Recently added',
+  _StashSort.price => 'Price',
+  _StashSort.amountOwned => 'Amount owned',
+};
+
+String _stashSortDirectionMenuLabel(
+  _StashSort sort,
+  _StashSortDirection direction,
+) =>
+    '${_stashSortLabel(sort)}(${switch (direction) {
+      _StashSortDirection.ascending => 'Asc.',
+      _StashSortDirection.descending => 'Desc.',
+    }})';
+
+FaIconData _stashSortDirectionIcon(_StashSortDirection direction) =>
+    switch (direction) {
+      _StashSortDirection.ascending => FontAwesomeIcons.arrowUp,
+      _StashSortDirection.descending => FontAwesomeIcons.arrowDown,
+    };
+
 class InfoItem {
   const InfoItem(this.label, this.value);
 
   final String label;
   final String value;
+}
+
+class _StashYarnItem {
+  const _StashYarnItem({
+    required this.imageUrl,
+    required this.title,
+    required this.subtitle,
+    required this.fallbackColor,
+    required this.filters,
+    required this.recentlyAddedRank,
+    required this.priceCents,
+    required this.amountOwned,
+  });
+
+  final String imageUrl;
+  final String title;
+  final String subtitle;
+  final Color fallbackColor;
+  final Set<String> filters;
+  final int recentlyAddedRank;
+  final int priceCents;
+  final int amountOwned;
 }
 
 class LoginScreen extends StatelessWidget {
@@ -222,17 +339,12 @@ class ForgotPasswordScreen extends StatelessWidget {
             onTap: onBack,
           ),
         ),
-        const SizedBox(height: 32),
-        const IconBadge(
+        const SizedBox(height: 14),
+        const _AuthBrand(
+          title: 'Reset password',
           icon: FontAwesomeIcons.lockOpen,
-          background: AppColors.rose,
-          foreground: AppColors.accentDark,
-          size: 80,
-          iconSize: 30,
         ),
-        const SizedBox(height: 24),
-        const NavTitle('Reset password'),
-        const SizedBox(height: 12),
+        const SizedBox(height: 18),
         const Text(
           'Yarn Stash will send a secure reset link to the email on your account.',
           style: TextStyle(
@@ -308,66 +420,532 @@ class ForgotPasswordScreen extends StatelessWidget {
   }
 }
 
-class CollectionScreen extends StatelessWidget {
+class CollectionScreen extends StatefulWidget {
   const CollectionScreen({super.key, required this.onYarnTap});
 
   final VoidCallback onYarnTap;
 
   @override
+  State<CollectionScreen> createState() => _CollectionScreenState();
+}
+
+class _CollectionScreenState extends State<CollectionScreen> {
+  Set<String> _activeFilters = const {_allStashFilter};
+  _StashSort _activeSort = _StashSort.recentlyAdded;
+  _StashSortDirection _sortDirection = _StashSortDirection.descending;
+
+  bool get _hasActiveFilters => !_activeFilters.contains(_allStashFilter);
+
+  List<String> get _filterChips {
+    if (!_hasActiveFilters) {
+      return const [];
+    }
+    return _stashFilterOrder
+        .where((filter) => _activeFilters.contains(filter))
+        .toList(growable: false);
+  }
+
+  List<_StashYarnItem> get _filteredItems {
+    final items = _hasActiveFilters
+        ? _stashItems.where(_matchesActiveFilters).toList(growable: false)
+        : List<_StashYarnItem>.of(_stashItems);
+    return _sortItems(items);
+  }
+
+  bool _matchesActiveFilters(_StashYarnItem item) {
+    return _matchesFilterGroup(item, _stashWeightFilters) &&
+        _matchesFilterGroup(item, _stashFiberFilters) &&
+        _matchesFilterGroup(item, _colorFamilyOptions) &&
+        _matchesFilterGroup(item, _stashStatusFilters);
+  }
+
+  bool _matchesFilterGroup(_StashYarnItem item, List<String> filters) {
+    final selectedFilters = filters.where(
+      (filter) => _activeFilters.contains(filter),
+    );
+    if (selectedFilters.isEmpty) {
+      return true;
+    }
+    return selectedFilters.any((filter) => item.filters.contains(filter));
+  }
+
+  List<_StashYarnItem> _sortItems(List<_StashYarnItem> items) {
+    return items..sort((a, b) {
+      final ascendingComparison = switch (_activeSort) {
+        _StashSort.recentlyAdded => b.recentlyAddedRank.compareTo(
+          a.recentlyAddedRank,
+        ),
+        _StashSort.price => a.priceCents.compareTo(b.priceCents),
+        _StashSort.amountOwned => a.amountOwned.compareTo(b.amountOwned),
+      };
+      return _sortDirection == _StashSortDirection.ascending
+          ? ascendingComparison
+          : -ascendingComparison;
+    });
+  }
+
+  Future<void> _openFilters() async {
+    final updatedFilters = await showDialog<Set<String>>(
+      context: context,
+      barrierColor: AppColors.ink.withValues(alpha: 0.35),
+      builder: (context) =>
+          _StashFilterDialog(initialFilters: Set<String>.of(_activeFilters)),
+    );
+
+    if (updatedFilters != null) {
+      setState(() => _activeFilters = updatedFilters);
+    }
+  }
+
+  void _resetFilters() {
+    setState(() => _activeFilters = const {_allStashFilter});
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final filteredItems = _filteredItems;
+
     return ListView(
       padding: const EdgeInsets.only(bottom: 18),
       children: [
-        const NavRow(
+        NavRow(
           title: 'Stash',
-          trailing: CircleIconButton(icon: FontAwesomeIcons.sliders),
+          trailing: CircleIconButton(
+            icon: FontAwesomeIcons.sliders,
+            label: 'Filter stash',
+            backgroundColor: _hasActiveFilters
+                ? AppColors.accent
+                : AppColors.card,
+            foregroundColor: _hasActiveFilters ? Colors.white : AppColors.ink,
+            borderColor: _hasActiveFilters ? AppColors.accent : AppColors.line,
+            onTap: _openFilters,
+          ),
         ),
         const SizedBox(height: 16),
         const SearchBox(text: 'Search your collection'),
-        const SizedBox(height: 16),
-        const _ChipStrip(
-          labels: ['All', 'Worsted', 'Merino', 'Sock', 'Unused'],
+        const SizedBox(height: 12),
+        _StashControlStrip(
+          activeSort: _activeSort,
+          activeDirection: _sortDirection,
+          allSelected: !_hasActiveFilters,
+          filterLabels: _filterChips,
+          onSortSelected: (sort, direction) => setState(() {
+            _activeSort = sort;
+            _sortDirection = direction;
+          }),
+          onClearFilters: _resetFilters,
         ),
         const SizedBox(height: 20),
-        GridView.count(
-          crossAxisCount: 2,
-          crossAxisSpacing: 12,
-          mainAxisSpacing: 12,
-          mainAxisExtent: 218,
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
+        if (filteredItems.isEmpty)
+          _EmptyFilterState(onReset: _resetFilters)
+        else
+          GridView.count(
+            crossAxisCount: 2,
+            crossAxisSpacing: 12,
+            mainAxisSpacing: 12,
+            mainAxisExtent: 218,
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            children: [
+              for (final item in filteredItems)
+                _YarnGridCard(
+                  imageUrl: item.imageUrl,
+                  title: item.title,
+                  subtitle: item.subtitle,
+                  fallbackColor: item.fallbackColor,
+                  onTap: widget.onYarnTap,
+                ),
+            ],
+          ),
+      ],
+    );
+  }
+}
+
+class _StashFilterDialog extends StatefulWidget {
+  const _StashFilterDialog({required this.initialFilters});
+
+  final Set<String> initialFilters;
+
+  @override
+  State<_StashFilterDialog> createState() => _StashFilterDialogState();
+}
+
+class _StashFilterDialogState extends State<_StashFilterDialog> {
+  late Set<String> _filters;
+
+  @override
+  void initState() {
+    super.initState();
+    _filters = Set<String>.of(widget.initialFilters);
+    if (_filters.isEmpty) {
+      _filters.add(_allStashFilter);
+    }
+  }
+
+  bool get _isDefault => _filters.contains(_allStashFilter);
+
+  void _selectAll() {
+    setState(() => _filters = {_allStashFilter});
+  }
+
+  void _toggleFilter(String filter) {
+    setState(() {
+      final updated = Set<String>.of(_filters)..remove(_allStashFilter);
+      if (updated.contains(filter)) {
+        updated.remove(filter);
+      } else {
+        updated.add(filter);
+      }
+      _filters = updated.isEmpty ? {_allStashFilter} : updated;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ModalCard(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.sizeOf(context).height * 0.78,
+        ),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  const Expanded(
+                    child: Text(
+                      'Filter stash',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: tightLetterSpacing,
+                      ),
+                    ),
+                  ),
+                  CircleIconButton(
+                    icon: FontAwesomeIcons.xmark,
+                    size: 36,
+                    iconSize: 15,
+                    onTap: () => Navigator.pop(context),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: _FilterChipButton(
+                  label: _allStashFilter,
+                  selected: _isDefault,
+                  onTap: _selectAll,
+                ),
+              ),
+              const SizedBox(height: 18),
+              _FilterSection(
+                label: 'Weight',
+                options: _stashWeightFilters,
+                selectedFilters: _filters,
+                onSelected: _toggleFilter,
+              ),
+              const SizedBox(height: 16),
+              _FilterSection(
+                label: 'Fiber',
+                options: _stashFiberFilters,
+                selectedFilters: _filters,
+                onSelected: _toggleFilter,
+              ),
+              const SizedBox(height: 16),
+              _FilterSection(
+                label: 'Color family',
+                options: _colorFamilyOptions,
+                selectedFilters: _filters,
+                onSelected: _toggleFilter,
+              ),
+              const SizedBox(height: 16),
+              _FilterSection(
+                label: 'Status',
+                options: _stashStatusFilters,
+                selectedFilters: _filters,
+                onSelected: _toggleFilter,
+              ),
+              const SizedBox(height: 20),
+              Row(
+                children: [
+                  Expanded(
+                    child: SecondaryButton(label: 'Reset', onTap: _selectAll),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: PrimaryButton(
+                      label: 'Apply',
+                      icon: FontAwesomeIcons.check,
+                      height: 48,
+                      onTap: () =>
+                          Navigator.pop(context, Set<String>.of(_filters)),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _FilterSection extends StatelessWidget {
+  const _FilterSection({
+    required this.label,
+    required this.options,
+    required this.selectedFilters,
+    required this.onSelected,
+  });
+
+  final String label;
+  final List<String> options;
+  final Set<String> selectedFilters;
+  final ValueChanged<String> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        FieldLabel(label),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
           children: [
-            _YarnGridCard(
-              imageUrl: _imgBlueYarn,
-              title: 'Malabrigo Rios',
-              subtitle: 'Aguas - 4 balls',
-              fallbackColor: const Color(0xFFB8D6E8),
-              onTap: onYarnTap,
-            ),
-            _YarnGridCard(
-              imageUrl: _imgPinkYarn,
-              title: 'Tosh Merino Light',
-              subtitle: 'Antler - 2 skeins',
-              fallbackColor: AppColors.rose,
-              onTap: onYarnTap,
-            ),
-            _YarnGridCard(
-              imageUrl: _imgGreenYarn,
-              title: 'Cascade 220',
-              subtitle: 'Sage - 7 balls',
-              fallbackColor: AppColors.sageSoft,
-              onTap: onYarnTap,
-            ),
-            _YarnGridCard(
-              imageUrl: _imgCreamYarn,
-              title: 'Cotton Pure',
-              subtitle: 'Heirloom - 6 balls',
-              fallbackColor: AppColors.cream,
-              onTap: onYarnTap,
-            ),
+            for (final option in options)
+              _FilterChipButton(
+                label: option,
+                selected: selectedFilters.contains(option),
+                onTap: () => onSelected(option),
+              ),
           ],
         ),
       ],
+    );
+  }
+}
+
+class _FilterChipButton extends StatelessWidget {
+  const _FilterChipButton({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = selected ? AppColors.accentDark : AppColors.muted;
+    return Material(
+      color: selected ? AppColors.cream : AppColors.card,
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: onTap,
+        child: Container(
+          height: 38,
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: selected ? AppColors.accentDark : AppColors.line,
+              width: selected ? 2 : 1,
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (selected) ...[
+                FaIcon(FontAwesomeIcons.check, color: color, size: 12),
+                const SizedBox(width: 7),
+              ],
+              Text(
+                label,
+                style: TextStyle(
+                  color: color,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: tightLetterSpacing,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _StashControlStrip extends StatelessWidget {
+  const _StashControlStrip({
+    required this.activeSort,
+    required this.activeDirection,
+    required this.allSelected,
+    required this.filterLabels,
+    required this.onSortSelected,
+    required this.onClearFilters,
+  });
+
+  final _StashSort activeSort;
+  final _StashSortDirection activeDirection;
+  final bool allSelected;
+  final List<String> filterLabels;
+  final void Function(_StashSort sort, _StashSortDirection direction)
+  onSortSelected;
+  final VoidCallback onClearFilters;
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      clipBehavior: Clip.none,
+      child: Row(
+        children: [
+          Semantics(
+            button: true,
+            selected: allSelected,
+            label: 'Clear stash filters',
+            child: GestureDetector(
+              onTap: onClearFilters,
+              child: StashChip(label: _allStashFilter, active: allSelected),
+            ),
+          ),
+          const SizedBox(width: 8),
+          for (final sort in _StashSort.values) ...[
+            _SortChip(
+              sort: sort,
+              selected: activeSort == sort,
+              activeDirection: activeDirection,
+              onSelected: (direction) => onSortSelected(sort, direction),
+            ),
+            const SizedBox(width: 8),
+          ],
+          for (var i = 0; i < filterLabels.length; i++) ...[
+            StashChip(label: filterLabels[i], active: true),
+            if (i < filterLabels.length - 1) const SizedBox(width: 8),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _SortChip extends StatelessWidget {
+  const _SortChip({
+    required this.sort,
+    required this.selected,
+    required this.activeDirection,
+    required this.onSelected,
+  });
+
+  final _StashSort sort;
+  final bool selected;
+  final _StashSortDirection activeDirection;
+  final ValueChanged<_StashSortDirection> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final label = _stashSortLabel(sort);
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: 'Sort by $label',
+      child: PopupMenuButton<_StashSortDirection>(
+        tooltip: 'Sort by $label',
+        color: AppColors.card,
+        elevation: 8,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        initialValue: selected ? activeDirection : null,
+        onSelected: onSelected,
+        itemBuilder: (context) => [
+          for (final direction in _StashSortDirection.values)
+            PopupMenuItem(
+              value: direction,
+              child: Row(
+                children: [
+                  SizedBox(
+                    width: 18,
+                    child: selected && activeDirection == direction
+                        ? const FaIcon(
+                            FontAwesomeIcons.check,
+                            size: 12,
+                            color: AppColors.accentDark,
+                          )
+                        : null,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      _stashSortDirectionMenuLabel(sort, direction),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  FaIcon(
+                    _stashSortDirectionIcon(direction),
+                    size: 12,
+                    color: AppColors.muted,
+                  ),
+                ],
+              ),
+            ),
+        ],
+        child: StashChip(
+          label: label,
+          active: selected,
+          trailingIcon: FontAwesomeIcons.chevronDown,
+        ),
+      ),
+    );
+  }
+}
+
+class _EmptyFilterState extends StatelessWidget {
+  const _EmptyFilterState({required this.onReset});
+
+  final VoidCallback onReset;
+
+  @override
+  Widget build(BuildContext context) {
+    return CardSurface(
+      padding: const EdgeInsets.all(18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const IconBadge(
+            icon: FontAwesomeIcons.sliders,
+            background: AppColors.goldSoft,
+            foreground: AppColors.accentDark,
+          ),
+          const SizedBox(height: 14),
+          const Text(
+            'No yarn matches these filters',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w900,
+              letterSpacing: tightLetterSpacing,
+            ),
+          ),
+          const SizedBox(height: 14),
+          SecondaryButton(
+            label: 'Reset filters',
+            icon: FontAwesomeIcons.rotateLeft,
+            onTap: onReset,
+          ),
+        ],
+      ),
     );
   }
 }
@@ -388,25 +966,8 @@ class SearchCatalogScreen extends StatelessWidget {
       padding: const EdgeInsets.only(bottom: 18),
       children: [
         const NavRow(title: 'Find yarn'),
-        const SizedBox(height: 8),
-        const Text(
-          'Search by name or brand and autofill trusted yarn attributes.',
-          style: TextStyle(
-            color: AppColors.muted,
-            fontSize: 15,
-            height: 1.35,
-            fontWeight: FontWeight.w700,
-            letterSpacing: tightLetterSpacing,
-          ),
-        ),
-        const SizedBox(height: 20),
-        const SearchBox(
-          text: 'Malabrigo Rios',
-          highlighted: true,
-          trailingIcon: FontAwesomeIcons.xmark,
-        ),
         const SizedBox(height: 16),
-        const _ChipStrip(labels: ['Catalog', 'Brand', 'Weight', 'Fiber']),
+        const SearchBox(text: 'Search by name or brand'),
         const SizedBox(height: 24),
         const Text(
           'Catalog matches',
@@ -773,20 +1334,7 @@ class _YarnFormScreenState extends State<YarnFormScreen> {
                 child: SelectField(
                   value: _colorFamily,
                   hintText: '',
-                  items: const [
-                    'White',
-                    'Red',
-                    'Orange',
-                    'Yellow',
-                    'Green',
-                    'Blue',
-                    'Purple',
-                    'Pink',
-                    'Brown',
-                    'Black',
-                    'Grey',
-                    'Multicolor',
-                  ],
+                  items: _colorFamilyOptions,
                   onChanged: (value) => setState(() => _colorFamily = value),
                 ),
               ),
@@ -893,11 +1441,14 @@ class FoldersScreen extends StatelessWidget {
   final VoidCallback onFolderTap;
 
   Future<void> _openCreateFolder(BuildContext context) async {
-    await showDialog<String>(
+    await showDialog<_FolderEditResult>(
       context: context,
       barrierColor: AppColors.ink.withValues(alpha: 0.35),
-      builder: (context) =>
-          const FolderEditDialog(initialName: '', title: 'Create folder'),
+      builder: (context) => const FolderEditDialog(
+        initialName: '',
+        title: 'Create folder',
+        showDelete: false,
+      ),
     );
   }
 
@@ -996,13 +1547,20 @@ class FolderDetailScreen extends StatelessWidget {
   final VoidCallback onYarnTap;
 
   Future<void> _openFolderEditor(BuildContext context) async {
-    final updated = await showDialog<String>(
+    final result = await showDialog<_FolderEditResult>(
       context: context,
       barrierColor: AppColors.ink.withValues(alpha: 0.35),
       builder: (context) => FolderEditDialog(initialName: folderName),
     );
-    if (updated != null && updated.trim().isNotEmpty) {
-      onFolderNameChanged(updated.trim());
+    if (result == null) return;
+
+    switch (result.action) {
+      case _FolderEditAction.save:
+        if (result.name.isNotEmpty) {
+          onFolderNameChanged(result.name);
+        }
+      case _FolderEditAction.delete:
+        onBack();
     }
   }
 
@@ -1288,19 +1846,35 @@ class FolderEditDialog extends StatefulWidget {
     super.key,
     required this.initialName,
     this.title = 'Edit folder',
+    this.showDelete = true,
   });
 
   final String initialName;
   final String title;
+  final bool showDelete;
 
   @override
   State<FolderEditDialog> createState() => _FolderEditDialogState();
+}
+
+enum _FolderEditAction { save, delete }
+
+class _FolderEditResult {
+  const _FolderEditResult.save(this.name) : action = _FolderEditAction.save;
+
+  const _FolderEditResult.delete()
+    : action = _FolderEditAction.delete,
+      name = '';
+
+  final _FolderEditAction action;
+  final String name;
 }
 
 class _FolderEditDialogState extends State<FolderEditDialog> {
   late final TextEditingController _controller;
   int _selectedIcon = 0;
   int _selectedColor = 0;
+  Color? _customColor;
 
   final _icons = const [
     FontAwesomeIcons.shirt,
@@ -1309,12 +1883,13 @@ class _FolderEditDialogState extends State<FolderEditDialog> {
     FontAwesomeIcons.boxArchive,
   ];
 
-  final _colors = const [
+  static const _customColorIndex = 4;
+
+  final _presetColors = const [
     AppColors.rose,
     AppColors.sageSoft,
     AppColors.goldSoft,
     AppColors.lavenderSoft,
-    AppColors.taupeSoft,
   ];
 
   @override
@@ -1327,6 +1902,38 @@ class _FolderEditDialogState extends State<FolderEditDialog> {
   void dispose() {
     _controller.dispose();
     super.dispose();
+  }
+
+  Future<void> _openCustomColorPicker() async {
+    final color = await showDialog<Color>(
+      context: context,
+      barrierColor: AppColors.ink.withValues(alpha: 0.35),
+      builder: (context) =>
+          CustomColorDialog(initialColor: _customColor ?? AppColors.accent),
+    );
+
+    if (color != null) {
+      setState(() {
+        _customColor = color;
+        _selectedColor = _customColorIndex;
+      });
+    }
+  }
+
+  void _saveFolder() {
+    Navigator.pop(context, _FolderEditResult.save(_controller.text.trim()));
+  }
+
+  Future<void> _deleteFolder() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      barrierColor: AppColors.ink.withValues(alpha: 0.35),
+      builder: (context) => const DeleteFolderConfirmDialog(),
+    );
+
+    if (confirmed == true && mounted) {
+      Navigator.pop(context, const _FolderEditResult.delete());
+    }
   }
 
   @override
@@ -1386,17 +1993,182 @@ class _FolderEditDialogState extends State<FolderEditDialog> {
           const SizedBox(height: 8),
           Row(
             children: [
-              for (var i = 0; i < _colors.length; i++) ...[
+              for (var i = 0; i < _presetColors.length; i++) ...[
                 Expanded(
                   child: SwatchButton(
-                    color: _colors[i],
+                    color: _presetColors[i],
                     selected: _selectedColor == i,
                     onTap: () => setState(() => _selectedColor = i),
                   ),
                 ),
-                if (i < _colors.length - 1) const SizedBox(width: 8),
+                const SizedBox(width: 8),
               ],
+              Expanded(
+                child: SwatchButton(
+                  color: const Color(0xFFE1DEDA),
+                  selected: _selectedColor == _customColorIndex,
+                  icon: FontAwesomeIcons.plus,
+                  iconColor: AppColors.muted,
+                  onTap: _openCustomColorPicker,
+                ),
+              ),
             ],
+          ),
+          const SizedBox(height: 20),
+          Row(
+            children: [
+              if (widget.showDelete) ...[
+                Expanded(
+                  child: SecondaryButton(
+                    label: 'Delete',
+                    foregroundColor: AppColors.danger,
+                    onTap: _deleteFolder,
+                  ),
+                ),
+                const SizedBox(width: 8),
+              ],
+              Expanded(
+                child: SecondaryButton(
+                  label: 'Cancel',
+                  onTap: () => Navigator.pop(context),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: PrimaryButton(
+                  label: 'Save',
+                  height: 48,
+                  onTap: _saveFolder,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class DeleteFolderConfirmDialog extends StatelessWidget {
+  const DeleteFolderConfirmDialog({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return ModalCard(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Text(
+            'Delete folder?',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w900,
+              letterSpacing: tightLetterSpacing,
+            ),
+          ),
+          const SizedBox(height: 10),
+          const Text(
+            'Are you sure you want to delete this folder?',
+            style: TextStyle(
+              color: AppColors.muted,
+              fontSize: 15,
+              height: 1.35,
+              fontWeight: FontWeight.w700,
+              letterSpacing: tightLetterSpacing,
+            ),
+          ),
+          const SizedBox(height: 20),
+          Row(
+            children: [
+              Expanded(
+                child: PrimaryButton(
+                  label: 'No',
+                  height: 48,
+                  onTap: () => Navigator.pop(context, false),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: SecondaryButton(
+                  label: 'Yes',
+                  foregroundColor: AppColors.danger,
+                  onTap: () => Navigator.pop(context, true),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class CustomColorDialog extends StatefulWidget {
+  const CustomColorDialog({super.key, required this.initialColor});
+
+  final Color initialColor;
+
+  @override
+  State<CustomColorDialog> createState() => _CustomColorDialogState();
+}
+
+class _CustomColorDialogState extends State<CustomColorDialog> {
+  late HSVColor _color;
+
+  @override
+  void initState() {
+    super.initState();
+    _color = HSVColor.fromColor(widget.initialColor);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final selectedColor = _color.toColor();
+    return ModalCard(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  'Custom color',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: tightLetterSpacing,
+                  ),
+                ),
+              ),
+              CircleIconButton(
+                icon: FontAwesomeIcons.xmark,
+                size: 36,
+                iconSize: 15,
+                onTap: () => Navigator.pop(context),
+              ),
+            ],
+          ),
+          const SizedBox(height: 18),
+          Center(
+            child: SizedBox(
+              width: 220,
+              height: 220,
+              child: _ColorWheelPicker(
+                color: _color,
+                onChanged: (color) => setState(() => _color = color),
+              ),
+            ),
+          ),
+          const SizedBox(height: 18),
+          Container(
+            height: 48,
+            decoration: BoxDecoration(
+              color: selectedColor,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: AppColors.line),
+            ),
           ),
           const SizedBox(height: 20),
           Row(
@@ -1407,12 +2179,12 @@ class _FolderEditDialogState extends State<FolderEditDialog> {
                   onTap: () => Navigator.pop(context),
                 ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 8),
               Expanded(
                 child: PrimaryButton(
-                  label: 'Save',
+                  label: 'Apply',
                   height: 48,
-                  onTap: () => Navigator.pop(context, _controller.text.trim()),
+                  onTap: () => Navigator.pop(context, selectedColor),
                 ),
               ),
             ],
@@ -1420,6 +2192,104 @@ class _FolderEditDialogState extends State<FolderEditDialog> {
         ],
       ),
     );
+  }
+}
+
+class _ColorWheelPicker extends StatelessWidget {
+  const _ColorWheelPicker({required this.color, required this.onChanged});
+
+  final HSVColor color;
+  final ValueChanged<HSVColor> onChanged;
+
+  void _updateColor(Offset position, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final delta = position - center;
+    final radius = math.min(size.width, size.height) / 2;
+    final distance = math.min(delta.distance, radius);
+    final radians = math.atan2(delta.dy, delta.dx);
+    final hue = (radians * 180 / math.pi + 360) % 360;
+    final saturation = (distance / radius).clamp(0.0, 1.0);
+    onChanged(HSVColor.fromAHSV(1, hue, saturation, 0.95));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final size = Size(constraints.maxWidth, constraints.maxHeight);
+        return GestureDetector(
+          onPanDown: (details) => _updateColor(details.localPosition, size),
+          onPanUpdate: (details) => _updateColor(details.localPosition, size),
+          child: CustomPaint(painter: _ColorWheelPainter(color)),
+        );
+      },
+    );
+  }
+}
+
+class _ColorWheelPainter extends CustomPainter {
+  const _ColorWheelPainter(this.color);
+
+  final HSVColor color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = math.min(size.width, size.height) / 2;
+    final rect = Rect.fromCircle(center: center, radius: radius);
+
+    canvas.drawCircle(
+      center,
+      radius,
+      Paint()
+        ..shader = const SweepGradient(
+          colors: [
+            Color(0xFFFF3B30),
+            Color(0xFFFFCC00),
+            Color(0xFF34C759),
+            Color(0xFF00C7BE),
+            Color(0xFF007AFF),
+            Color(0xFFAF52DE),
+            Color(0xFFFF3B30),
+          ],
+        ).createShader(rect),
+    );
+    canvas.drawCircle(
+      center,
+      radius,
+      Paint()
+        ..shader = RadialGradient(
+          colors: [Colors.white, Colors.white.withValues(alpha: 0)],
+        ).createShader(rect),
+    );
+
+    final angle = color.hue * math.pi / 180;
+    final selectorRadius = color.saturation * radius;
+    final selectorCenter = Offset(
+      center.dx + math.cos(angle) * selectorRadius,
+      center.dy + math.sin(angle) * selectorRadius,
+    );
+
+    canvas.drawCircle(
+      selectorCenter,
+      8,
+      Paint()
+        ..color = Colors.white
+        ..style = PaintingStyle.fill,
+    );
+    canvas.drawCircle(
+      selectorCenter,
+      8,
+      Paint()
+        ..color = AppColors.ink
+        ..strokeWidth = 2
+        ..style = PaintingStyle.stroke,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _ColorWheelPainter oldDelegate) {
+    return oldDelegate.color != color;
   }
 }
 
@@ -1633,9 +2503,13 @@ class _UnitSettingsDialogState extends State<UnitSettingsDialog> {
 }
 
 class _AuthBrand extends StatelessWidget {
-  const _AuthBrand({required this.title});
+  const _AuthBrand({
+    required this.title,
+    this.icon = FontAwesomeIcons.layerGroup,
+  });
 
   final String title;
+  final FaIconData icon;
 
   @override
   Widget build(BuildContext context) {
@@ -1649,13 +2523,7 @@ class _AuthBrand extends StatelessWidget {
             borderRadius: BorderRadius.circular(18),
             boxShadow: accentShadow,
           ),
-          child: const Center(
-            child: FaIcon(
-              FontAwesomeIcons.layerGroup,
-              color: Colors.white,
-              size: 20,
-            ),
-          ),
+          child: Center(child: FaIcon(icon, color: Colors.white, size: 20)),
         ),
         const SizedBox(width: 12),
         Expanded(
@@ -1764,28 +2632,6 @@ class _AuthSwitchLine extends StatelessWidget {
         ),
         LinkText(text: action, onTap: onTap),
       ],
-    );
-  }
-}
-
-class _ChipStrip extends StatelessWidget {
-  const _ChipStrip({required this.labels});
-
-  final List<String> labels;
-
-  @override
-  Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      clipBehavior: Clip.none,
-      child: Row(
-        children: [
-          for (var i = 0; i < labels.length; i++) ...[
-            StashChip(label: labels[i], active: i == 0),
-            if (i < labels.length - 1) const SizedBox(width: 8),
-          ],
-        ],
-      ),
     );
   }
 }

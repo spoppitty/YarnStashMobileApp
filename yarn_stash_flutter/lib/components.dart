@@ -45,20 +45,23 @@ class NavRow extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: EdgeInsets.only(top: marginTop),
-      child: Row(
-        children: [
-          ?leading,
-          if (title != null)
-            Expanded(
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: NavTitle(title!),
-              ),
-            )
-          else
-            const Spacer(),
-          ?trailing,
-        ],
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 42),
+        child: Row(
+          children: [
+            ?leading,
+            if (title != null)
+              Expanded(
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: NavTitle(title!),
+                ),
+              )
+            else
+              const Spacer(),
+            ?trailing,
+          ],
+        ),
       ),
     );
   }
@@ -266,7 +269,7 @@ class _ActionButton extends StatelessWidget {
   }
 }
 
-class SearchBox extends StatelessWidget {
+class SearchBox extends StatefulWidget {
   const SearchBox({
     super.key,
     required this.text,
@@ -281,52 +284,121 @@ class SearchBox extends StatelessWidget {
   final VoidCallback? onTap;
 
   @override
+  State<SearchBox> createState() => _SearchBoxState();
+}
+
+class _SearchBoxState extends State<SearchBox> {
+  late final TextEditingController _controller;
+  bool _hasText = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController()..addListener(_handleTextChanged);
+  }
+
+  @override
+  void didUpdateWidget(SearchBox oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.text != widget.text) {
+      setState(() {});
+    }
+  }
+
+  void _handleTextChanged() {
+    final hasText = _controller.text.isNotEmpty;
+    if (hasText != _hasText) {
+      setState(() => _hasText = hasText);
+    }
+  }
+
+  void _clearText() {
+    _controller.clear();
+  }
+
+  @override
+  void dispose() {
+    _controller.removeListener(_handleTextChanged);
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final iconColor = highlighted ? AppColors.accent : AppColors.muted;
-    final textColor = highlighted ? AppColors.ink : AppColors.muted;
+    final iconColor = widget.highlighted ? AppColors.accent : AppColors.muted;
     return Material(
       color: AppColors.card,
       borderRadius: BorderRadius.circular(18),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(18),
-        onTap: onTap,
-        child: Container(
-          height: 50,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(
-              color: highlighted ? AppColors.accent : AppColors.line,
-            ),
-            boxShadow: appShadow,
+      child: Container(
+        height: 50,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(
+            color: widget.highlighted ? AppColors.accent : AppColors.line,
           ),
-          padding: const EdgeInsets.symmetric(horizontal: 14),
-          child: Row(
-            children: [
-              FaIcon(
-                FontAwesomeIcons.magnifyingGlass,
-                size: 15,
-                color: iconColor,
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  text,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: textColor,
+          boxShadow: appShadow,
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 14),
+        child: Row(
+          children: [
+            FaIcon(
+              FontAwesomeIcons.magnifyingGlass,
+              size: 15,
+              color: iconColor,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: TextField(
+                controller: _controller,
+                onTap: widget.onTap,
+                cursorColor: AppColors.accent,
+                maxLines: 1,
+                textInputAction: TextInputAction.search,
+                style: TextStyle(
+                  color: AppColors.ink,
+                  fontSize: 15,
+                  fontWeight: widget.highlighted
+                      ? FontWeight.w900
+                      : FontWeight.w700,
+                  letterSpacing: tightLetterSpacing,
+                ),
+                decoration: InputDecoration(
+                  hintText: widget.text.isEmpty ? null : widget.text,
+                  hintStyle: TextStyle(
+                    color: AppColors.muted,
                     fontSize: 15,
-                    fontWeight: highlighted ? FontWeight.w900 : FontWeight.w700,
+                    fontWeight: FontWeight.w700,
                     letterSpacing: tightLetterSpacing,
                   ),
                 ),
               ),
-              if (trailingIcon != null) ...[
-                const SizedBox(width: 10),
-                FaIcon(trailingIcon, size: 16, color: AppColors.muted),
-              ],
+            ),
+            if (_hasText) ...[
+              const SizedBox(width: 10),
+              GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: _clearText,
+                child: Padding(
+                  padding: const EdgeInsets.all(4),
+                  child: FaIcon(
+                    FontAwesomeIcons.xmark,
+                    size: 16,
+                    color: AppColors.muted,
+                  ),
+                ),
+              ),
+            ] else if (widget.trailingIcon != null) ...[
+              const SizedBox(width: 10),
+              Padding(
+                padding: const EdgeInsets.all(4),
+                child: FaIcon(
+                  widget.trailingIcon,
+                  size: 16,
+                  color: AppColors.muted,
+                ),
+              ),
             ],
-          ),
+          ],
         ),
       ),
     );
@@ -340,12 +412,14 @@ class StashChip extends StatelessWidget {
     this.active = false,
     this.small = false,
     this.icon,
+    this.trailingIcon,
   });
 
   final String label;
   final bool active;
   final bool small;
   final FaIconData? icon;
+  final FaIconData? trailingIcon;
 
   @override
   Widget build(BuildContext context) {
@@ -380,6 +454,14 @@ class StashChip extends StatelessWidget {
               letterSpacing: tightLetterSpacing,
             ),
           ),
+          if (trailingIcon != null) ...[
+            SizedBox(width: small ? 5 : 7),
+            FaIcon(
+              trailingIcon,
+              size: small ? 10 : 12,
+              color: active ? Colors.white : AppColors.muted,
+            ),
+          ],
         ],
       ),
     );
@@ -1030,11 +1112,15 @@ class SwatchButton extends StatelessWidget {
     super.key,
     required this.color,
     required this.selected,
+    this.icon,
+    this.iconColor = AppColors.muted,
     this.onTap,
   });
 
   final Color color;
   final bool selected;
+  final FaIconData? icon;
+  final Color iconColor;
   final VoidCallback? onTap;
 
   @override
@@ -1054,6 +1140,9 @@ class SwatchButton extends StatelessWidget {
               width: selected ? 2 : 1,
             ),
           ),
+          child: icon == null
+              ? null
+              : Center(child: FaIcon(icon, color: iconColor, size: 15)),
         ),
       ),
     );
