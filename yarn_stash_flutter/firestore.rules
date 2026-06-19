@@ -1,0 +1,31 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    match /users/{uid} {
+      allow read, update, delete: if isOwner(uid);
+      allow create: if isOwner(uid) && request.resource.data.uid == uid;
+
+      match /stashCollections/{collectionId} {
+        allow read, delete: if isOwner(uid);
+        allow create, update: if isOwner(uid)
+          && request.resource.data.ownerUid == uid;
+
+        match /yarns/{yarnId} {
+          allow read, delete: if isOwner(uid);
+          allow create, update: if isOwner(uid)
+            && request.resource.data.ownerUid == uid
+            && request.resource.data.collectionId == collectionId;
+        }
+      }
+    }
+  }
+}

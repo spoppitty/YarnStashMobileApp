@@ -1,1 +1,26 @@
-{"flutter":{"platforms":{"android":{"default":{"projectId":"yarnstashmobileapp","appId":"1:939927765385:android:583aa4f47c6e5bbd026158","fileOutput":"android/app/google-services.json"}},"dart":{"lib/firebase_options.dart":{"projectId":"yarnstashmobileapp","configurations":{"android":"1:939927765385:android:583aa4f47c6e5bbd026158","ios":"1:939927765385:ios:91bfa9462ac49251026158"}}}}}}
+{
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "yarnstashmobileapp",
+          "appId": "1:939927765385:android:583aa4f47c6e5bbd026158",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "yarnstashmobileapp",
+          "configurations": {
+            "android": "1:939927765385:android:583aa4f47c6e5bbd026158",
+            "ios": "1:939927765385:ios:91bfa9462ac49251026158"
+          }
+        }
+      }
+    }
+  },
+  "firestore": {
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
+  }
+}

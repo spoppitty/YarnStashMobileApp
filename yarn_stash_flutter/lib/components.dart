@@ -650,7 +650,11 @@ class AuthField extends StatelessWidget {
     this.obscureText = false,
     this.controller,
     this.keyboardType,
+    this.textInputAction,
+    this.onFieldSubmitted,
+    this.validator,
     this.suffixIcon,
+    this.enabled = true,
   });
 
   final String label;
@@ -659,7 +663,11 @@ class AuthField extends StatelessWidget {
   final bool obscureText;
   final TextEditingController? controller;
   final TextInputType? keyboardType;
+  final TextInputAction? textInputAction;
+  final ValueChanged<String>? onFieldSubmitted;
+  final FormFieldValidator<String>? validator;
   final Widget? suffixIcon;
+  final bool enabled;
 
   @override
   Widget build(BuildContext context) {
@@ -682,7 +690,11 @@ class AuthField extends StatelessWidget {
             controller: controller,
             initialValue: controller == null ? initialValue : null,
             obscureText: obscureText,
+            enabled: enabled,
             keyboardType: keyboardType,
+            textInputAction: textInputAction,
+            onFieldSubmitted: onFieldSubmitted,
+            validator: validator,
             cursorColor: AppColors.accent,
             style: const TextStyle(
               color: AppColors.ink,

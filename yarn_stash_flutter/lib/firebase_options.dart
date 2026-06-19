@@ -22,35 +22,42 @@ class DefaultFirebaseOptions {
         'you can reconfigure this by running the FlutterFire CLI again.',
       );
     }
-    switch (defaultTargetPlatform) {
-      case TargetPlatform.android:
-        return android;
-      case TargetPlatform.iOS:
-        return ios;
-      case TargetPlatform.macOS:
-        throw UnsupportedError(
-          'DefaultFirebaseOptions have not been configured for macos - '
-          'you can reconfigure this by running the FlutterFire CLI again.',
-        );
-      case TargetPlatform.windows:
-        throw UnsupportedError(
-          'DefaultFirebaseOptions have not been configured for windows - '
-          'you can reconfigure this by running the FlutterFire CLI again.',
-        );
-      case TargetPlatform.linux:
-        throw UnsupportedError(
-          'DefaultFirebaseOptions have not been configured for linux - '
-          'you can reconfigure this by running the FlutterFire CLI again.',
-        );
-      default:
-        throw UnsupportedError(
-          'DefaultFirebaseOptions are not supported for this platform.',
-        );
+    final options = switch (defaultTargetPlatform) {
+      TargetPlatform.android => android,
+      TargetPlatform.iOS => ios,
+      TargetPlatform.macOS => throw UnsupportedError(
+        'DefaultFirebaseOptions have not been configured for macos - '
+        'you can reconfigure this by running the FlutterFire CLI again.',
+      ),
+      TargetPlatform.windows => throw UnsupportedError(
+        'DefaultFirebaseOptions have not been configured for windows - '
+        'you can reconfigure this by running the FlutterFire CLI again.',
+      ),
+      TargetPlatform.linux => throw UnsupportedError(
+        'DefaultFirebaseOptions have not been configured for linux - '
+        'you can reconfigure this by running the FlutterFire CLI again.',
+      ),
+      _ => throw UnsupportedError(
+        'DefaultFirebaseOptions are not supported for this platform.',
+      ),
+    };
+
+    _validate(options);
+    return options;
+  }
+
+  static void _validate(FirebaseOptions options) {
+    if (options.apiKey.isEmpty) {
+      throw StateError(
+        'Missing Firebase API key. Run Flutter with '
+        '--dart-define-from-file=firebase.env.json or define the platform '
+        'API key with --dart-define.',
+      );
     }
   }
 
   static const FirebaseOptions android = FirebaseOptions(
-    apiKey: 'AIzaSyBz3EQFfDrpk9j9kx1hzFVKD1kjGhsXryk',
+    apiKey: String.fromEnvironment('FIREBASE_ANDROID_API_KEY'),
     appId: '1:939927765385:android:583aa4f47c6e5bbd026158',
     messagingSenderId: '939927765385',
     projectId: 'yarnstashmobileapp',
@@ -58,7 +65,7 @@ class DefaultFirebaseOptions {
   );
 
   static const FirebaseOptions ios = FirebaseOptions(
-    apiKey: 'AIzaSyB1EXRoz6aUMpJU9jWBA8fzZs5SspexC-E',
+    apiKey: String.fromEnvironment('FIREBASE_IOS_API_KEY'),
     appId: '1:939927765385:ios:91bfa9462ac49251026158',
     messagingSenderId: '939927765385',
     projectId: 'yarnstashmobileapp',

@@ -1,15 +1,15 @@
 import 'dart:math' as math;
 
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 
 import 'app_style.dart';
 import 'components.dart';
+import 'data/models/yarn.dart';
+import 'data/repositories/yarn_repository.dart';
+import 'data/services/auth_service.dart';
 
-const _imgBlueYarn = 'https://source.unsplash.com/500x500/?blue,yarn';
-const _imgPinkYarn = 'https://source.unsplash.com/501x501/?pink,yarn';
-const _imgGreenYarn = 'https://source.unsplash.com/502x502/?green,wool,yarn';
-const _imgCreamYarn = 'https://source.unsplash.com/503x503/?cream,yarn';
 const _imgMerino = 'https://source.unsplash.com/420x420/?merino,yarn,skein';
 const _imgWool = 'https://source.unsplash.com/410x410/?wool,skein';
 const _imgHandDyed = 'https://source.unsplash.com/411x411/?handdyed,yarn';
@@ -58,49 +58,6 @@ const _stashFilterOrder = [
   ..._stashFiberFilters,
   ..._colorFamilyOptions,
   ..._stashStatusFilters,
-];
-
-const _stashItems = <_StashYarnItem>[
-  _StashYarnItem(
-    imageUrl: _imgBlueYarn,
-    title: 'Malabrigo Rios',
-    subtitle: 'Aguas - 4 balls',
-    fallbackColor: Color(0xFFB8D6E8),
-    filters: {'Worsted', 'Merino', 'Blue', 'In stash'},
-    recentlyAddedRank: 1,
-    priceCents: 1450,
-    amountOwned: 4,
-  ),
-  _StashYarnItem(
-    imageUrl: _imgPinkYarn,
-    title: 'Tosh Merino Light',
-    subtitle: 'Antler - 2 skeins',
-    fallbackColor: AppColors.rose,
-    filters: {'Sock', 'Merino', 'White', 'In stash'},
-    recentlyAddedRank: 2,
-    priceCents: 3150,
-    amountOwned: 2,
-  ),
-  _StashYarnItem(
-    imageUrl: _imgGreenYarn,
-    title: 'Cascade 220',
-    subtitle: 'Sage - 7 balls',
-    fallbackColor: AppColors.sageSoft,
-    filters: {'Worsted', 'Wool', 'Green', 'In stash'},
-    recentlyAddedRank: 3,
-    priceCents: 1199,
-    amountOwned: 7,
-  ),
-  _StashYarnItem(
-    imageUrl: _imgCreamYarn,
-    title: 'Cotton Pure',
-    subtitle: 'Heirloom - 6 balls',
-    fallbackColor: AppColors.cream,
-    filters: {'Cotton', 'White', 'Used up'},
-    recentlyAddedRank: 4,
-    priceCents: 850,
-    amountOwned: 6,
-  ),
 ];
 
 enum _StashSort { recentlyAdded, price, amountOwned }
@@ -157,282 +114,670 @@ class _StashYarnItem {
   final int amountOwned;
 }
 
-class LoginScreen extends StatelessWidget {
+_StashYarnItem _stashItemFromYarn(Yarn yarn) {
+  final colorway = yarn.colorway?.trim();
+  final balls = yarn.skeinCount == 1 ? '1 ball' : '${yarn.skeinCount} balls';
+  final subtitleParts = [
+    if (colorway != null && colorway.isNotEmpty) colorway,
+    balls,
+  ];
+  final filters = <String>{
+    if (yarn.weightCategory != null && yarn.weightCategory!.trim().isNotEmpty)
+      yarn.weightCategory!.trim(),
+    if (yarn.fiberContent != null && yarn.fiberContent!.trim().isNotEmpty)
+      yarn.fiberContent!.trim(),
+    if (yarn.colorFamily != null && yarn.colorFamily!.trim().isNotEmpty)
+      yarn.colorFamily!.trim(),
+    switch (yarn.status) {
+      YarnStatus.inStash => 'In stash',
+      YarnStatus.usedUp => 'Used up',
+      YarnStatus.inProject => 'In project',
+      YarnStatus.destashed => 'Destashed',
+    },
+  };
+
+  return _StashYarnItem(
+    imageUrl: yarn.imageUrls.isEmpty ? '' : yarn.imageUrls.first,
+    title: yarn.name.trim().isEmpty ? yarn.brandName : yarn.name,
+    subtitle: subtitleParts.isEmpty
+        ? yarn.brandName
+        : subtitleParts.join(' - '),
+    fallbackColor: _fallbackColorForYarn(yarn),
+    filters: filters,
+    recentlyAddedRank: yarn.createdAt.millisecondsSinceEpoch,
+    priceCents: yarn.priceCents ?? 0,
+    amountOwned: yarn.skeinCount,
+  );
+}
+
+Color _fallbackColorForYarn(Yarn yarn) {
+  return switch (yarn.colorFamily?.toLowerCase()) {
+    'green' => AppColors.sageSoft,
+    'pink' || 'red' => AppColors.rose,
+    'yellow' || 'orange' || 'brown' => AppColors.goldSoft,
+    'purple' => AppColors.lavenderSoft,
+    'white' => AppColors.cream,
+    _ => const Color(0xFFB8D6E8),
+  };
+}
+
+String? _requiredAuthValue(String? value, String label) {
+  if (value == null || value.trim().isEmpty) {
+    return '$label is required';
+  }
+  return null;
+}
+
+String? _emailValidator(String? value) {
+  final requiredMessage = _requiredAuthValue(value, 'Email');
+  if (requiredMessage != null) return requiredMessage;
+
+  final email = value!.trim();
+  if (!email.contains('@') || !email.contains('.')) {
+    return 'Enter a valid email';
+  }
+  return null;
+}
+
+String? _passwordValidator(String? value) {
+  final requiredMessage = _requiredAuthValue(value, 'Password');
+  if (requiredMessage != null) return requiredMessage;
+
+  if (value!.length < 6) {
+    return 'Password must be at least 6 characters';
+  }
+  return null;
+}
+
+String _authErrorMessage(FirebaseAuthException error) {
+  return switch (error.code) {
+    'email-already-in-use' => 'That email is already connected to an account.',
+    'invalid-credential' ||
+    'user-not-found' ||
+    'wrong-password' => 'The email or password is incorrect.',
+    'invalid-email' => 'Enter a valid email address.',
+    'network-request-failed' => 'Check your connection and try again.',
+    'operation-not-allowed' =>
+      'Email/password sign-in is not enabled for this Firebase project.',
+    'too-many-requests' => 'Too many attempts. Try again later.',
+    'user-disabled' => 'This account has been disabled.',
+    'weak-password' => 'Use a stronger password with at least 6 characters.',
+    _ => error.message ?? 'Something went wrong. Try again.',
+  };
+}
+
+class _AuthMessage extends StatelessWidget {
+  const _AuthMessage({required this.message, required this.isError});
+
+  final String message;
+  final bool isError;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = isError ? AppColors.danger : AppColors.accentDark;
+    final background = isError ? const Color(0xFFFFF1F1) : AppColors.sageSoft;
+    final icon = isError
+        ? FontAwesomeIcons.triangleExclamation
+        : FontAwesomeIcons.circleCheck;
+
+    return Container(
+      padding: const EdgeInsets.all(13),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: color.withValues(alpha: 0.25)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          FaIcon(icon, size: 15, color: color),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              message,
+              style: TextStyle(
+                color: color,
+                fontSize: 14,
+                height: 1.3,
+                fontWeight: FontWeight.w800,
+                letterSpacing: tightLetterSpacing,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class LoginScreen extends StatefulWidget {
   const LoginScreen({
     super.key,
+    required this.authService,
     required this.onLogin,
     required this.onSignUp,
     required this.onForgotPassword,
   });
 
+  final AuthService authService;
   final VoidCallback onLogin;
   final VoidCallback onSignUp;
   final VoidCallback onForgotPassword;
 
   @override
+  State<LoginScreen> createState() => _LoginScreenState();
+}
+
+class _LoginScreenState extends State<LoginScreen> {
+  final _formKey = GlobalKey<FormState>();
+  late final TextEditingController _emailController;
+  late final TextEditingController _passwordController;
+  bool _isSubmitting = false;
+  String? _errorMessage;
+
+  @override
+  void initState() {
+    super.initState();
+    _emailController = TextEditingController();
+    _passwordController = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _emailController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (_isSubmitting) return;
+    FocusScope.of(context).unfocus();
+
+    if (!(_formKey.currentState?.validate() ?? false)) {
+      return;
+    }
+
+    setState(() {
+      _isSubmitting = true;
+      _errorMessage = null;
+    });
+
+    try {
+      await widget.authService.signInWithEmailAndPassword(
+        email: _emailController.text,
+        password: _passwordController.text,
+      );
+      await widget.authService.ensureSignedInUserProfile();
+      if (!mounted) return;
+      widget.onLogin();
+    } on FirebaseAuthException catch (error) {
+      if (!mounted) return;
+      setState(() => _errorMessage = _authErrorMessage(error));
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _errorMessage = 'Unable to log in. Try again.');
+    } finally {
+      if (mounted) {
+        setState(() => _isSubmitting = false);
+      }
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return ListView(
-      padding: const EdgeInsets.only(bottom: 28),
-      children: [
-        const SizedBox(height: 14),
-        const _AuthBrand(title: 'Welcome back'),
-        const SizedBox(height: 64),
-        const Center(
-          child: FaIcon(
-            FontAwesomeIcons.basketShopping,
-            color: AppColors.accentDark,
-            size: 60,
-          ),
-        ),
-        const SizedBox(height: 32),
-        const AuthField(
-          label: 'Email',
-          initialValue: 'sarah@example.com',
-          keyboardType: TextInputType.emailAddress,
-        ),
-        const SizedBox(height: 12),
-        const AuthField(
-          label: 'Password',
-          initialValue: 'weekender',
-          obscureText: true,
-          suffixIcon: Padding(
-            padding: EdgeInsets.only(right: 2),
+    return Form(
+      key: _formKey,
+      child: ListView(
+        padding: const EdgeInsets.only(bottom: 28),
+        children: [
+          const SizedBox(height: 14),
+          const _AuthBrand(title: 'Welcome back'),
+          const SizedBox(height: 64),
+          const Center(
             child: FaIcon(
-              FontAwesomeIcons.eye,
-              size: 14,
-              color: AppColors.muted,
+              FontAwesomeIcons.basketShopping,
+              color: AppColors.accentDark,
+              size: 60,
             ),
           ),
-        ),
-        const SizedBox(height: 16),
-        Row(
-          children: [
-            const _RememberCheck(),
-            const SizedBox(width: 8),
-            const Expanded(
-              child: Text(
-                'Remember me',
-                style: TextStyle(
-                  color: Color(0xFF5F5148),
-                  fontSize: 14,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: tightLetterSpacing,
-                ),
+          const SizedBox(height: 32),
+          AuthField(
+            label: 'Email',
+            controller: _emailController,
+            hintText: 'you@example.com',
+            keyboardType: TextInputType.emailAddress,
+            textInputAction: TextInputAction.next,
+            validator: _emailValidator,
+            enabled: !_isSubmitting,
+          ),
+          const SizedBox(height: 12),
+          AuthField(
+            label: 'Password',
+            controller: _passwordController,
+            hintText: 'Password',
+            obscureText: true,
+            textInputAction: TextInputAction.done,
+            onFieldSubmitted: (_) => _submit(),
+            validator: _passwordValidator,
+            enabled: !_isSubmitting,
+            suffixIcon: const Padding(
+              padding: EdgeInsets.only(right: 2),
+              child: FaIcon(
+                FontAwesomeIcons.eye,
+                size: 14,
+                color: AppColors.muted,
               ),
             ),
-            LinkText(text: 'Forgot?', onTap: onForgotPassword),
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              const _RememberCheck(),
+              const SizedBox(width: 8),
+              const Expanded(
+                child: Text(
+                  'Remember me',
+                  style: TextStyle(
+                    color: Color(0xFF5F5148),
+                    fontSize: 14,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: tightLetterSpacing,
+                  ),
+                ),
+              ),
+              LinkText(
+                text: 'Forgot?',
+                onTap: _isSubmitting ? null : widget.onForgotPassword,
+              ),
+            ],
+          ),
+          if (_errorMessage != null) ...[
+            const SizedBox(height: 16),
+            _AuthMessage(message: _errorMessage!, isError: true),
           ],
-        ),
-        const SizedBox(height: 24),
-        PrimaryButton(
-          label: 'Log in',
-          icon: FontAwesomeIcons.arrowRightToBracket,
-          onTap: onLogin,
-        ),
-        const SizedBox(height: 24),
-        const _AuthDivider(),
-        const SizedBox(height: 20),
-        const SecondaryButton(
-          label: 'Continue with Google',
-          icon: FontAwesomeIcons.google,
-        ),
-        const SizedBox(height: 24),
-        _AuthSwitchLine(
-          prefix: 'New to Yarn Stash?',
-          action: 'Create account',
-          onTap: onSignUp,
-        ),
-      ],
+          const SizedBox(height: 24),
+          PrimaryButton(
+            label: _isSubmitting ? 'Logging in...' : 'Log in',
+            icon: FontAwesomeIcons.arrowRightToBracket,
+            onTap: _isSubmitting ? null : _submit,
+          ),
+          const SizedBox(height: 24),
+          const _AuthDivider(),
+          const SizedBox(height: 20),
+          const SecondaryButton(
+            label: 'Continue with Google',
+            icon: FontAwesomeIcons.google,
+          ),
+          const SizedBox(height: 24),
+          _AuthSwitchLine(
+            prefix: 'New to Yarn Stash?',
+            action: 'Create account',
+            onTap: _isSubmitting ? null : widget.onSignUp,
+          ),
+        ],
+      ),
     );
   }
 }
 
-class SignUpScreen extends StatelessWidget {
+class SignUpScreen extends StatefulWidget {
   const SignUpScreen({
     super.key,
+    required this.authService,
     required this.onBack,
     required this.onCreateAccount,
     required this.onLogin,
   });
 
+  final AuthService authService;
   final VoidCallback onBack;
   final VoidCallback onCreateAccount;
   final VoidCallback onLogin;
 
   @override
+  State<SignUpScreen> createState() => _SignUpScreenState();
+}
+
+class _SignUpScreenState extends State<SignUpScreen> {
+  final _formKey = GlobalKey<FormState>();
+  late final TextEditingController _usernameController;
+  late final TextEditingController _emailController;
+  late final TextEditingController _passwordController;
+  bool _isSubmitting = false;
+  String? _errorMessage;
+
+  @override
+  void initState() {
+    super.initState();
+    _usernameController = TextEditingController();
+    _emailController = TextEditingController();
+    _passwordController = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _usernameController.dispose();
+    _emailController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (_isSubmitting) return;
+    FocusScope.of(context).unfocus();
+
+    if (!(_formKey.currentState?.validate() ?? false)) {
+      return;
+    }
+
+    setState(() {
+      _isSubmitting = true;
+      _errorMessage = null;
+    });
+
+    try {
+      await widget.authService.createUserWithEmailAndPassword(
+        email: _emailController.text,
+        password: _passwordController.text,
+        displayName: _usernameController.text,
+      );
+      if (!mounted) return;
+      widget.onCreateAccount();
+    } on FirebaseAuthException catch (error) {
+      if (!mounted) return;
+      setState(() => _errorMessage = _authErrorMessage(error));
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _errorMessage = 'Unable to create account. Try again.');
+    } finally {
+      if (mounted) {
+        setState(() => _isSubmitting = false);
+      }
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return ListView(
-      padding: const EdgeInsets.only(bottom: 28),
-      children: [
-        NavRow(
-          leading: CircleIconButton(
-            icon: FontAwesomeIcons.chevronLeft,
-            onTap: onBack,
-          ),
-        ),
-        const SizedBox(height: 14),
-        const _AuthBrand(title: 'Create account'),
-        const SizedBox(height: 18),
-        const AuthField(label: 'Username', initialValue: 'Sarah Liu'),
-        const SizedBox(height: 12),
-        const AuthField(
-          label: 'Email',
-          hintText: 'you@example.com',
-          keyboardType: TextInputType.emailAddress,
-        ),
-        const SizedBox(height: 12),
-        const AuthField(
-          label: 'Password',
-          hintText: 'Create a password',
-          obscureText: true,
-          suffixIcon: Padding(
-            padding: EdgeInsets.only(right: 2),
-            child: FaIcon(
-              FontAwesomeIcons.eye,
-              size: 14,
-              color: AppColors.muted,
+    return Form(
+      key: _formKey,
+      child: ListView(
+        padding: const EdgeInsets.only(bottom: 28),
+        children: [
+          NavRow(
+            leading: CircleIconButton(
+              icon: FontAwesomeIcons.chevronLeft,
+              onTap: _isSubmitting ? null : widget.onBack,
             ),
           ),
-        ),
-        const SizedBox(height: 20),
-        PrimaryButton(
-          label: 'Create account',
-          icon: FontAwesomeIcons.userPlus,
-          onTap: onCreateAccount,
-        ),
-        const SizedBox(height: 24),
-        const _AuthDivider(),
-        const SizedBox(height: 20),
-        const SecondaryButton(
-          label: 'Sign up with Google',
-          icon: FontAwesomeIcons.google,
-        ),
-        const SizedBox(height: 24),
-        _AuthSwitchLine(
-          prefix: 'Already have an account?',
-          action: 'Log in',
-          onTap: onLogin,
-        ),
-      ],
+          const SizedBox(height: 14),
+          const _AuthBrand(title: 'Create account'),
+          const SizedBox(height: 18),
+          AuthField(
+            label: 'Username',
+            controller: _usernameController,
+            hintText: 'Your name',
+            textInputAction: TextInputAction.next,
+            validator: (value) => _requiredAuthValue(value, 'Username'),
+            enabled: !_isSubmitting,
+          ),
+          const SizedBox(height: 12),
+          AuthField(
+            label: 'Email',
+            controller: _emailController,
+            hintText: 'you@example.com',
+            keyboardType: TextInputType.emailAddress,
+            textInputAction: TextInputAction.next,
+            validator: _emailValidator,
+            enabled: !_isSubmitting,
+          ),
+          const SizedBox(height: 12),
+          AuthField(
+            label: 'Password',
+            controller: _passwordController,
+            hintText: 'Create a password',
+            obscureText: true,
+            textInputAction: TextInputAction.done,
+            onFieldSubmitted: (_) => _submit(),
+            validator: _passwordValidator,
+            enabled: !_isSubmitting,
+            suffixIcon: const Padding(
+              padding: EdgeInsets.only(right: 2),
+              child: FaIcon(
+                FontAwesomeIcons.eye,
+                size: 14,
+                color: AppColors.muted,
+              ),
+            ),
+          ),
+          if (_errorMessage != null) ...[
+            const SizedBox(height: 16),
+            _AuthMessage(message: _errorMessage!, isError: true),
+          ],
+          const SizedBox(height: 20),
+          PrimaryButton(
+            label: _isSubmitting ? 'Creating...' : 'Create account',
+            icon: FontAwesomeIcons.userPlus,
+            onTap: _isSubmitting ? null : _submit,
+          ),
+          const SizedBox(height: 24),
+          const _AuthDivider(),
+          const SizedBox(height: 20),
+          const SecondaryButton(
+            label: 'Sign up with Google',
+            icon: FontAwesomeIcons.google,
+          ),
+          const SizedBox(height: 24),
+          _AuthSwitchLine(
+            prefix: 'Already have an account?',
+            action: 'Log in',
+            onTap: _isSubmitting ? null : widget.onLogin,
+          ),
+        ],
+      ),
     );
   }
 }
 
-class ForgotPasswordScreen extends StatelessWidget {
+class ForgotPasswordScreen extends StatefulWidget {
   const ForgotPasswordScreen({
     super.key,
+    required this.authService,
     required this.onBack,
     required this.onSend,
   });
 
+  final AuthService authService;
   final VoidCallback onBack;
   final VoidCallback onSend;
 
   @override
+  State<ForgotPasswordScreen> createState() => _ForgotPasswordScreenState();
+}
+
+class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
+  final _formKey = GlobalKey<FormState>();
+  late final TextEditingController _emailController;
+  bool _isSubmitting = false;
+  String? _errorMessage;
+
+  @override
+  void initState() {
+    super.initState();
+    _emailController = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _emailController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (_isSubmitting) return;
+    FocusScope.of(context).unfocus();
+
+    if (!(_formKey.currentState?.validate() ?? false)) {
+      return;
+    }
+
+    setState(() {
+      _isSubmitting = true;
+      _errorMessage = null;
+    });
+
+    try {
+      await widget.authService.sendPasswordResetEmail(_emailController.text);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Password reset email sent.')),
+      );
+      widget.onSend();
+    } on FirebaseAuthException catch (error) {
+      if (!mounted) return;
+      setState(() => _errorMessage = _authErrorMessage(error));
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _errorMessage = 'Unable to send reset email. Try again.');
+    } finally {
+      if (mounted) {
+        setState(() => _isSubmitting = false);
+      }
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return ListView(
-      padding: const EdgeInsets.only(bottom: 28),
-      children: [
-        NavRow(
-          leading: CircleIconButton(
-            icon: FontAwesomeIcons.chevronLeft,
-            onTap: onBack,
+    return Form(
+      key: _formKey,
+      child: ListView(
+        padding: const EdgeInsets.only(bottom: 28),
+        children: [
+          NavRow(
+            leading: CircleIconButton(
+              icon: FontAwesomeIcons.chevronLeft,
+              onTap: _isSubmitting ? null : widget.onBack,
+            ),
           ),
-        ),
-        const SizedBox(height: 14),
-        const _AuthBrand(
-          title: 'Reset password',
-          icon: FontAwesomeIcons.lockOpen,
-        ),
-        const SizedBox(height: 18),
-        const Text(
-          'Yarn Stash will send a secure reset link to the email on your account.',
-          style: TextStyle(
-            color: AppColors.muted,
-            fontSize: 16,
-            height: 1.45,
-            fontWeight: FontWeight.w700,
-            letterSpacing: tightLetterSpacing,
+          const SizedBox(height: 14),
+          const _AuthBrand(
+            title: 'Reset password',
+            icon: FontAwesomeIcons.lockOpen,
           ),
-        ),
-        const SizedBox(height: 18),
-        const AuthField(
-          label: 'Email',
-          initialValue: 'sarah@example.com',
-          keyboardType: TextInputType.emailAddress,
-        ),
-        const SizedBox(height: 20),
-        PrimaryButton(
-          label: 'Send reset link',
-          icon: FontAwesomeIcons.paperPlane,
-          onTap: onSend,
-        ),
-        const SizedBox(height: 20),
-        const CardSurface(
-          padding: EdgeInsets.all(16),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              IconBadge(
-                icon: FontAwesomeIcons.envelope,
-                background: AppColors.sageSoft,
-                foreground: Color(0xFF587456),
-                size: 40,
-                iconSize: 16,
-              ),
-              SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Check your inbox',
-                      style: TextStyle(
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: tightLetterSpacing,
-                      ),
-                    ),
-                    SizedBox(height: 4),
-                    Text(
-                      'Reset links expire after 30 minutes for account security.',
-                      style: TextStyle(
-                        color: AppColors.muted,
-                        fontSize: 14,
-                        height: 1.35,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: tightLetterSpacing,
-                      ),
-                    ),
-                  ],
+          const SizedBox(height: 18),
+          const Text(
+            'Yarn Stash will send a secure reset link to the email on your account.',
+            style: TextStyle(
+              color: AppColors.muted,
+              fontSize: 16,
+              height: 1.45,
+              fontWeight: FontWeight.w700,
+              letterSpacing: tightLetterSpacing,
+            ),
+          ),
+          const SizedBox(height: 18),
+          AuthField(
+            label: 'Email',
+            controller: _emailController,
+            hintText: 'you@example.com',
+            keyboardType: TextInputType.emailAddress,
+            textInputAction: TextInputAction.done,
+            onFieldSubmitted: (_) => _submit(),
+            validator: _emailValidator,
+            enabled: !_isSubmitting,
+          ),
+          if (_errorMessage != null) ...[
+            const SizedBox(height: 16),
+            _AuthMessage(message: _errorMessage!, isError: true),
+          ],
+          const SizedBox(height: 20),
+          PrimaryButton(
+            label: _isSubmitting ? 'Sending...' : 'Send reset link',
+            icon: FontAwesomeIcons.paperPlane,
+            onTap: _isSubmitting ? null : _submit,
+          ),
+          const SizedBox(height: 20),
+          const CardSurface(
+            padding: EdgeInsets.all(16),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                IconBadge(
+                  icon: FontAwesomeIcons.envelope,
+                  background: AppColors.sageSoft,
+                  foreground: Color(0xFF587456),
+                  size: 40,
+                  iconSize: 16,
                 ),
-              ),
-            ],
+                SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Check your inbox',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: tightLetterSpacing,
+                        ),
+                      ),
+                      SizedBox(height: 4),
+                      Text(
+                        'Reset links expire after 30 minutes for account security.',
+                        style: TextStyle(
+                          color: AppColors.muted,
+                          fontSize: 14,
+                          height: 1.35,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: tightLetterSpacing,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
-        ),
-        const SizedBox(height: 24),
-        _AuthSwitchLine(
-          prefix: 'Remembered it?',
-          action: 'Back to login',
-          onTap: onBack,
-        ),
-      ],
+          const SizedBox(height: 24),
+          _AuthSwitchLine(
+            prefix: 'Remembered it?',
+            action: 'Back to login',
+            onTap: _isSubmitting ? null : widget.onBack,
+          ),
+        ],
+      ),
     );
   }
 }
 
 class CollectionScreen extends StatefulWidget {
-  const CollectionScreen({super.key, required this.onYarnTap});
+  const CollectionScreen({
+    super.key,
+    required this.userId,
+    required this.onYarnTap,
+    required this.onAddYarn,
+    this.yarnRepository,
+  });
 
+  final String userId;
   final VoidCallback onYarnTap;
+  final VoidCallback onAddYarn;
+  final YarnRepository? yarnRepository;
 
   @override
   State<CollectionScreen> createState() => _CollectionScreenState();
 }
 
 class _CollectionScreenState extends State<CollectionScreen> {
+  late final YarnRepository _yarnRepository;
   Set<String> _activeFilters = const {_allStashFilter};
   _StashSort _activeSort = _StashSort.recentlyAdded;
   _StashSortDirection _sortDirection = _StashSortDirection.descending;
+
+  @override
+  void initState() {
+    super.initState();
+    _yarnRepository = widget.yarnRepository ?? YarnRepository();
+  }
 
   bool get _hasActiveFilters => !_activeFilters.contains(_allStashFilter);
 
@@ -445,10 +790,11 @@ class _CollectionScreenState extends State<CollectionScreen> {
         .toList(growable: false);
   }
 
-  List<_StashYarnItem> get _filteredItems {
+  List<_StashYarnItem> _filteredItems(List<Yarn> yarns) {
+    final stashItems = yarns.map(_stashItemFromYarn).toList(growable: false);
     final items = _hasActiveFilters
-        ? _stashItems.where(_matchesActiveFilters).toList(growable: false)
-        : List<_StashYarnItem>.of(_stashItems);
+        ? stashItems.where(_matchesActiveFilters).toList(growable: false)
+        : List<_StashYarnItem>.of(stashItems);
     return _sortItems(items);
   }
 
@@ -471,16 +817,16 @@ class _CollectionScreenState extends State<CollectionScreen> {
 
   List<_StashYarnItem> _sortItems(List<_StashYarnItem> items) {
     return items..sort((a, b) {
-      final ascendingComparison = switch (_activeSort) {
-        _StashSort.recentlyAdded => b.recentlyAddedRank.compareTo(
-          a.recentlyAddedRank,
+      final comparison = switch (_activeSort) {
+        _StashSort.recentlyAdded => a.recentlyAddedRank.compareTo(
+          b.recentlyAddedRank,
         ),
         _StashSort.price => a.priceCents.compareTo(b.priceCents),
         _StashSort.amountOwned => a.amountOwned.compareTo(b.amountOwned),
       };
       return _sortDirection == _StashSortDirection.ascending
-          ? ascendingComparison
-          : -ascendingComparison;
+          ? comparison
+          : -comparison;
     });
   }
 
@@ -503,8 +849,6 @@ class _CollectionScreenState extends State<CollectionScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final filteredItems = _filteredItems;
-
     return ListView(
       padding: const EdgeInsets.only(bottom: 18),
       children: [
@@ -536,27 +880,53 @@ class _CollectionScreenState extends State<CollectionScreen> {
           onClearFilters: _resetFilters,
         ),
         const SizedBox(height: 20),
-        if (filteredItems.isEmpty)
-          _EmptyFilterState(onReset: _resetFilters)
-        else
-          GridView.count(
-            crossAxisCount: 2,
-            crossAxisSpacing: 12,
-            mainAxisSpacing: 12,
-            mainAxisExtent: 218,
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            children: [
-              for (final item in filteredItems)
-                _YarnGridCard(
-                  imageUrl: item.imageUrl,
-                  title: item.title,
-                  subtitle: item.subtitle,
-                  fallbackColor: item.fallbackColor,
-                  onTap: widget.onYarnTap,
+        StreamBuilder<List<Yarn>>(
+          stream: _yarnRepository.watchYarns(uid: widget.userId),
+          builder: (context, snapshot) {
+            if (snapshot.hasError) {
+              return const _StashLoadErrorState();
+            }
+
+            if (snapshot.connectionState == ConnectionState.waiting &&
+                !snapshot.hasData) {
+              return const Center(
+                child: Padding(
+                  padding: EdgeInsets.symmetric(vertical: 42),
+                  child: CircularProgressIndicator(color: AppColors.accent),
                 ),
-            ],
-          ),
+              );
+            }
+
+            final yarns = snapshot.data ?? const <Yarn>[];
+            if (yarns.isEmpty) {
+              return _EmptyStashState(onAddYarn: widget.onAddYarn);
+            }
+
+            final filteredItems = _filteredItems(yarns);
+            if (filteredItems.isEmpty) {
+              return _EmptyFilterState(onReset: _resetFilters);
+            }
+
+            return GridView.count(
+              crossAxisCount: 2,
+              crossAxisSpacing: 12,
+              mainAxisSpacing: 12,
+              mainAxisExtent: 218,
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              children: [
+                for (final item in filteredItems)
+                  _YarnGridCard(
+                    imageUrl: item.imageUrl,
+                    title: item.title,
+                    subtitle: item.subtitle,
+                    fallbackColor: item.fallbackColor,
+                    onTap: widget.onYarnTap,
+                  ),
+              ],
+            );
+          },
+        ),
       ],
     );
   }
@@ -950,6 +1320,89 @@ class _EmptyFilterState extends StatelessWidget {
   }
 }
 
+class _EmptyStashState extends StatelessWidget {
+  const _EmptyStashState({required this.onAddYarn});
+
+  final VoidCallback onAddYarn;
+
+  @override
+  Widget build(BuildContext context) {
+    return CardSurface(
+      padding: const EdgeInsets.all(18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const IconBadge(
+            icon: FontAwesomeIcons.basketShopping,
+            background: AppColors.rose,
+            foreground: AppColors.accentDark,
+          ),
+          const SizedBox(height: 14),
+          const Text(
+            'Your stash is empty',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w900,
+              letterSpacing: tightLetterSpacing,
+            ),
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            'Add yarn to start building your collection.',
+            style: TextStyle(
+              color: AppColors.muted,
+              fontSize: 14,
+              height: 1.35,
+              fontWeight: FontWeight.w800,
+              letterSpacing: tightLetterSpacing,
+            ),
+          ),
+          const SizedBox(height: 14),
+          PrimaryButton(
+            label: 'Add yarn',
+            icon: FontAwesomeIcons.plus,
+            onTap: onAddYarn,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StashLoadErrorState extends StatelessWidget {
+  const _StashLoadErrorState();
+
+  @override
+  Widget build(BuildContext context) {
+    return const CardSurface(
+      padding: EdgeInsets.all(18),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          IconBadge(
+            icon: FontAwesomeIcons.triangleExclamation,
+            background: Color(0xFFFFF1F1),
+            foreground: AppColors.danger,
+          ),
+          SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              'Unable to load your stash right now.',
+              style: TextStyle(
+                color: AppColors.danger,
+                fontSize: 14,
+                height: 1.35,
+                fontWeight: FontWeight.w800,
+                letterSpacing: tightLetterSpacing,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class SearchCatalogScreen extends StatelessWidget {
   const SearchCatalogScreen({
     super.key,
@@ -1131,21 +1584,26 @@ class YarnFormScreen extends StatefulWidget {
   const YarnFormScreen({
     super.key,
     required this.isEditing,
+    required this.userId,
     required this.onBack,
     required this.onPrimary,
     this.startBlank = false,
+    this.yarnRepository,
   });
 
   final bool isEditing;
+  final String userId;
   final VoidCallback onBack;
   final VoidCallback onPrimary;
   final bool startBlank;
+  final YarnRepository? yarnRepository;
 
   @override
   State<YarnFormScreen> createState() => _YarnFormScreenState();
 }
 
 class _YarnFormScreenState extends State<YarnFormScreen> {
+  late final YarnRepository _yarnRepository;
   late final TextEditingController _yarnNameController;
   late final TextEditingController _brandController;
   late final TextEditingController _weightController;
@@ -1162,10 +1620,13 @@ class _YarnFormScreenState extends State<YarnFormScreen> {
 
   String? _colorFamily;
   late String _folder;
+  bool _isSaving = false;
+  String? _errorMessage;
 
   @override
   void initState() {
     super.initState();
+    _yarnRepository = widget.yarnRepository ?? YarnRepository();
     _colorFamily = widget.startBlank ? null : 'White';
     _folder = widget.isEditing ? 'Sweaters' : 'No folder';
     _yarnNameController = TextEditingController(
@@ -1205,6 +1666,96 @@ class _YarnFormScreenState extends State<YarnFormScreen> {
     _notesController = TextEditingController(
       text: widget.startBlank ? '' : 'Reserved for the Weekender sweater.',
     );
+  }
+
+  int? _parseFirstInt(String value) {
+    final match = RegExp(r'\d+').firstMatch(value);
+    if (match == null) return null;
+    return int.tryParse(match.group(0)!);
+  }
+
+  int? _parsePriceCents(String value) {
+    final cleaned = value.replaceAll(RegExp(r'[^0-9.]'), '');
+    if (cleaned.isEmpty) return null;
+    final parsed = double.tryParse(cleaned);
+    if (parsed == null) return null;
+    return (parsed * 100).round();
+  }
+
+  String? _trimmedOrNull(String value) {
+    final trimmed = value.trim();
+    return trimmed.isEmpty ? null : trimmed;
+  }
+
+  Future<void> _saveYarn() async {
+    if (widget.isEditing) {
+      widget.onPrimary();
+      return;
+    }
+
+    if (_isSaving) return;
+    FocusScope.of(context).unfocus();
+
+    final yarnName = _yarnNameController.text.trim();
+    final brand = _brandController.text.trim();
+
+    if (yarnName.isEmpty || brand.isEmpty) {
+      setState(() {
+        _errorMessage = 'Yarn name and brand are required.';
+      });
+      return;
+    }
+
+    setState(() {
+      _isSaving = true;
+      _errorMessage = null;
+    });
+
+    final now = DateTime.now();
+    final folderName = _folder == 'No folder' ? null : _folder;
+
+    try {
+      await _yarnRepository.createYarn(
+        uid: widget.userId,
+        yarn: Yarn(
+          id: '',
+          ownerUid: widget.userId,
+          collectionId: '',
+          brandName: brand,
+          name: yarnName,
+          colorway: _trimmedOrNull(_colorwayController.text),
+          colorFamily: _colorFamily,
+          dyeLot: _trimmedOrNull(_dyeLotController.text),
+          weightCategory: _trimmedOrNull(_weightController.text),
+          wpi: _parseFirstInt(_wpiController.text),
+          yardage: _parseFirstInt(_lengthController.text),
+          unitWeightGrams: _parseFirstInt(_unitWeightController.text),
+          needleSize: _trimmedOrNull(_needleController.text),
+          gauge: _trimmedOrNull(_gaugeController.text),
+          skeinCount: _parseFirstInt(_ballsController.text) ?? 1,
+          priceCents: _parsePriceCents(_priceController.text),
+          folderName: folderName,
+          notes: _trimmedOrNull(_notesController.text),
+          createdAt: now,
+          updatedAt: now,
+        ),
+      );
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Yarn added to your stash.')),
+      );
+      widget.onPrimary();
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _errorMessage = 'Unable to save yarn. Try again.';
+      });
+    } finally {
+      if (mounted) {
+        setState(() => _isSaving = false);
+      }
+    }
   }
 
   @override
@@ -1275,7 +1826,7 @@ class _YarnFormScreenState extends State<YarnFormScreen> {
             icon: widget.isEditing
                 ? FontAwesomeIcons.xmark
                 : FontAwesomeIcons.chevronLeft,
-            onTap: widget.onBack,
+            onTap: _isSaving ? null : widget.onBack,
           ),
         ),
         const SizedBox(height: 16),
@@ -1409,13 +1960,21 @@ class _YarnFormScreenState extends State<YarnFormScreen> {
           label: 'Images',
           child: Column(children: [SizedBox(height: 8), UploadBox()]),
         ),
+        if (_errorMessage != null) ...[
+          const SizedBox(height: 12),
+          _AuthMessage(message: _errorMessage!, isError: true),
+        ],
         const SizedBox(height: 20),
         PrimaryButton(
-          label: widget.isEditing ? 'Save changes' : 'Add to collection',
+          label: _isSaving
+              ? 'Saving...'
+              : widget.isEditing
+              ? 'Save changes'
+              : 'Add to collection',
           icon: widget.isEditing
               ? FontAwesomeIcons.check
               : FontAwesomeIcons.plus,
-          onTap: widget.onPrimary,
+          onTap: _isSaving ? null : _saveYarn,
         ),
         if (widget.isEditing) ...[
           const SizedBox(height: 12),
@@ -1652,8 +2211,13 @@ class FolderDetailScreen extends StatelessWidget {
 }
 
 class ProfileScreen extends StatelessWidget {
-  const ProfileScreen({super.key, required this.onSettings});
+  const ProfileScreen({
+    super.key,
+    required this.displayName,
+    required this.onSettings,
+  });
 
+  final String displayName;
   final VoidCallback onSettings;
 
   @override
@@ -1669,11 +2233,11 @@ class ProfileScreen extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 16),
-        const CardSurface(
-          padding: EdgeInsets.all(16),
+        CardSurface(
+          padding: const EdgeInsets.all(16),
           child: Row(
             children: [
-              DecoratedBox(
+              const DecoratedBox(
                 decoration: BoxDecoration(
                   color: AppColors.cream,
                   borderRadius: BorderRadius.all(Radius.circular(24)),
@@ -1689,10 +2253,10 @@ class ProfileScreen extends StatelessWidget {
                   ),
                 ),
               ),
-              SizedBox(width: 12),
+              const SizedBox(width: 12),
               Text(
-                'Sarah Liu',
-                style: TextStyle(
+                displayName,
+                style: const TextStyle(
                   fontSize: 20,
                   fontWeight: FontWeight.w900,
                   letterSpacing: tightLetterSpacing,
@@ -2612,7 +3176,7 @@ class _AuthSwitchLine extends StatelessWidget {
 
   final String prefix;
   final String action;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {

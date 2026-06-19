@@ -1,9 +1,13 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:firebase_core/firebase_core.dart';
 
 import 'app_style.dart';
+import 'data/services/auth_service.dart';
 import 'firebase_options.dart';
 import 'screens.dart';
 
@@ -52,13 +56,16 @@ enum AppScreen {
 }
 
 class YarnStashRoot extends StatefulWidget {
-  const YarnStashRoot({super.key});
+  const YarnStashRoot({super.key, this.authService});
+
+  final AuthService? authService;
 
   @override
   State<YarnStashRoot> createState() => _YarnStashRootState();
 }
 
 class _YarnStashRootState extends State<YarnStashRoot> {
+  late final AuthService _authService;
   AppScreen _screen = AppScreen.login;
   int _currentTab = 0;
   AppScreen _yarnDetailBackScreen = AppScreen.collection;
@@ -66,6 +73,13 @@ class _YarnStashRootState extends State<YarnStashRoot> {
   String _folderName = 'Sweaters';
   String _accountSummary = 'Email, password, profile';
   String _unitSummary = 'Yards / Grams';
+  String? _profileBootstrapUid;
+
+  @override
+  void initState() {
+    super.initState();
+    _authService = widget.authService ?? AuthService();
+  }
 
   void _go(AppScreen screen) {
     setState(() {
@@ -110,8 +124,32 @@ class _YarnStashRootState extends State<YarnStashRoot> {
     });
   }
 
-  bool get _showsTabs {
-    return switch (_screen) {
+  Future<void> _signOut() async {
+    await _authService.signOut();
+    if (!mounted) return;
+    setState(() {
+      _screen = AppScreen.login;
+      _currentTab = 0;
+    });
+  }
+
+  bool _isAuthScreen(AppScreen screen) {
+    return switch (screen) {
+      AppScreen.login || AppScreen.signUp || AppScreen.forgotPassword => true,
+      _ => false,
+    };
+  }
+
+  AppScreen _effectiveScreen({required bool isSignedIn}) {
+    if (isSignedIn) {
+      return _isAuthScreen(_screen) ? AppScreen.collection : _screen;
+    }
+
+    return _isAuthScreen(_screen) ? _screen : AppScreen.login;
+  }
+
+  bool _showsTabsFor(AppScreen screen) {
+    return switch (screen) {
       AppScreen.collection ||
       AppScreen.search ||
       AppScreen.folders ||
@@ -120,24 +158,88 @@ class _YarnStashRootState extends State<YarnStashRoot> {
     };
   }
 
-  Widget _buildScreen() {
-    return switch (_screen) {
+  int _tabForScreen(AppScreen screen) {
+    return switch (screen) {
+      AppScreen.collection => 0,
+      AppScreen.yarnDetail || AppScreen.editYarn =>
+        _yarnDetailBackScreen == AppScreen.folderDetail ? 2 : 0,
+      AppScreen.search || AppScreen.addYarn => 1,
+      AppScreen.folders || AppScreen.folderDetail => 2,
+      AppScreen.profile || AppScreen.settings => 3,
+      _ => _currentTab,
+    };
+  }
+
+  String _profileName(User? user) {
+    final displayName = user?.displayName?.trim();
+    if (displayName != null && displayName.isNotEmpty) {
+      return displayName;
+    }
+
+    final email = user?.email?.trim();
+    if (email != null && email.isNotEmpty) {
+      return email.split('@').first;
+    }
+
+    return 'Your stash';
+  }
+
+  String _accountSummaryFor(User? user) {
+    final displayName = user?.displayName?.trim();
+    final email = user?.email?.trim();
+
+    if (displayName != null &&
+        displayName.isNotEmpty &&
+        email != null &&
+        email.isNotEmpty) {
+      return '$displayName / $email';
+    }
+
+    if (email != null && email.isNotEmpty) {
+      return email;
+    }
+
+    return _accountSummary;
+  }
+
+  void _ensureProfileFor(User? user) {
+    if (user == null || _profileBootstrapUid == user.uid) {
+      return;
+    }
+
+    _profileBootstrapUid = user.uid;
+    unawaited(
+      _authService.ensureSignedInUserProfile().catchError((_) {
+        if (mounted && _profileBootstrapUid == user.uid) {
+          setState(() => _profileBootstrapUid = null);
+        }
+      }),
+    );
+  }
+
+  Widget _buildScreen(AppScreen screen, User? user) {
+    return switch (screen) {
       AppScreen.login => LoginScreen(
+        authService: _authService,
         onLogin: () => _go(AppScreen.collection),
         onSignUp: () => _go(AppScreen.signUp),
         onForgotPassword: () => _go(AppScreen.forgotPassword),
       ),
       AppScreen.signUp => SignUpScreen(
+        authService: _authService,
         onBack: () => _go(AppScreen.login),
         onCreateAccount: () => _go(AppScreen.collection),
         onLogin: () => _go(AppScreen.login),
       ),
       AppScreen.forgotPassword => ForgotPasswordScreen(
+        authService: _authService,
         onBack: () => _go(AppScreen.login),
         onSend: () => _go(AppScreen.login),
       ),
       AppScreen.collection => CollectionScreen(
+        userId: user!.uid,
         onYarnTap: () => _openYarnDetail(AppScreen.collection),
+        onAddYarn: () => _openAddYarn(startBlank: true),
       ),
       AppScreen.search => SearchCatalogScreen(
         onAddYarn: () => _openAddYarn(startBlank: false),
@@ -145,6 +247,7 @@ class _YarnStashRootState extends State<YarnStashRoot> {
       ),
       AppScreen.addYarn => YarnFormScreen(
         isEditing: false,
+        userId: user!.uid,
         startBlank: _addYarnStartsBlank,
         onBack: () => _go(AppScreen.search),
         onPrimary: () => _go(AppScreen.collection),
@@ -155,6 +258,7 @@ class _YarnStashRootState extends State<YarnStashRoot> {
       ),
       AppScreen.editYarn => YarnFormScreen(
         isEditing: true,
+        userId: user!.uid,
         onBack: () => _go(AppScreen.yarnDetail),
         onPrimary: () => _go(AppScreen.yarnDetail),
       ),
@@ -168,13 +272,14 @@ class _YarnStashRootState extends State<YarnStashRoot> {
         onYarnTap: () => _openYarnDetail(AppScreen.folderDetail),
       ),
       AppScreen.profile => ProfileScreen(
+        displayName: _profileName(user),
         onSettings: () => _go(AppScreen.settings),
       ),
       AppScreen.settings => SettingsScreen(
-        accountSummary: _accountSummary,
+        accountSummary: _accountSummaryFor(user),
         unitSummary: _unitSummary,
         onBack: () => _go(AppScreen.profile),
-        onSignOut: () => _go(AppScreen.login),
+        onSignOut: _signOut,
         onAccountChanged: (summary) =>
             setState(() => _accountSummary = summary),
         onUnitsChanged: (summary) => setState(() => _unitSummary = summary),
@@ -184,11 +289,33 @@ class _YarnStashRootState extends State<YarnStashRoot> {
 
   @override
   Widget build(BuildContext context) {
-    return PhoneScaffold(
-      showTabs: _showsTabs,
-      currentTab: _currentTab,
-      onTabSelected: _selectTab,
-      child: _buildScreen(),
+    return StreamBuilder<User?>(
+      stream: _authService.authStateChanges,
+      initialData: _authService.currentUser,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting &&
+            snapshot.data == null) {
+          return PhoneScaffold(
+            showTabs: false,
+            currentTab: 0,
+            onTabSelected: _selectTab,
+            child: const Center(
+              child: CircularProgressIndicator(color: AppColors.accent),
+            ),
+          );
+        }
+
+        final user = snapshot.data;
+        _ensureProfileFor(user);
+        final screen = _effectiveScreen(isSignedIn: user != null);
+
+        return PhoneScaffold(
+          showTabs: _showsTabsFor(screen),
+          currentTab: _tabForScreen(screen),
+          onTabSelected: _selectTab,
+          child: _buildScreen(screen, user),
+        );
+      },
     );
   }
 }
