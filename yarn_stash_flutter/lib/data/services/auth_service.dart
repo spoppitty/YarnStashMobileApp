@@ -90,12 +90,17 @@ class AuthService {
   }) async {
     final now = DateTime.now();
     final existingUser = await _userRepository.getUser(uid);
+    final existingDisplayName = existingUser?.displayName.trim();
+    final resolvedDisplayName =
+        existingDisplayName != null && existingDisplayName.isNotEmpty
+        ? existingUser!.displayName
+        : displayName.trim();
 
     await _userRepository.upsertUser(
       AppUser(
         uid: uid,
         email: email,
-        displayName: existingUser?.displayName ?? displayName,
+        displayName: resolvedDisplayName,
         defaultLengthUnit: existingUser?.defaultLengthUnit ?? LengthUnit.yards,
         defaultWeightUnit: existingUser?.defaultWeightUnit ?? WeightUnit.grams,
         createdAt: existingUser?.createdAt ?? now,

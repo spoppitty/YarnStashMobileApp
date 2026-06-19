@@ -49,6 +49,9 @@ void main() {
         brandName: 'Malabrigo',
         name: 'Rios',
         wpi: 9,
+        fiberContents: const [
+          YarnFiberContent(fiber: 'Merino', percentage: 100),
+        ],
         folderName: 'Sweaters',
         status: YarnStatus.inStash,
         createdAt: DateTime.utc(2026),
@@ -62,6 +65,10 @@ void main() {
       expect(data['status'], 'inStash');
       expect(data['skeinCount'], 1);
       expect(data['wpi'], 9);
+      expect(data['fiberContent'], '100% Merino');
+      expect(data['fiberContents'], [
+        {'fiber': 'Merino', 'percentage': 100},
+      ]);
       expect(data['folderName'], 'Sweaters');
     });
   });

@@ -14,26 +14,10 @@ const _imgMerino = 'https://source.unsplash.com/420x420/?merino,yarn,skein';
 const _imgWool = 'https://source.unsplash.com/410x410/?wool,skein';
 const _imgHandDyed = 'https://source.unsplash.com/411x411/?handdyed,yarn';
 const _imgDyed = 'https://source.unsplash.com/412x412/?dyed,yarn';
-const _imgDetail = 'https://source.unsplash.com/900x700/?blue,yarn,skein';
 const _imgEdit = 'https://source.unsplash.com/430x430/?blue,wool,yarn';
 const _imgFolderGreen = 'https://source.unsplash.com/440x440/?green,yarn,skein';
 const _imgFolderBrown = 'https://source.unsplash.com/441x441/?brown,yarn';
 const _imgFolderCream = 'https://source.unsplash.com/442x442/?cream,wool';
-
-const _detailFields = <InfoItem>[
-  InfoItem('Weight', 'Worsted'),
-  InfoItem('WPI', '9'),
-  InfoItem('Length', '210 yd'),
-  InfoItem('Unit weight', '100 g'),
-  InfoItem('Needle', 'US 6-8'),
-  InfoItem('Gauge', '18-22 sts'),
-  InfoItem('Fiber', '100% Merino'),
-  InfoItem('Color family', 'Blue'),
-  InfoItem('Colorway', 'Aguas'),
-  InfoItem('Dye lot', 'A27'),
-  InfoItem('Balls', '4'),
-  InfoItem('Price', r'$14.50'),
-];
 
 const _allStashFilter = 'All';
 const _stashWeightFilters = ['Worsted', 'Sock'];
@@ -94,6 +78,7 @@ class InfoItem {
 
 class _StashYarnItem {
   const _StashYarnItem({
+    required this.yarn,
     required this.imageUrl,
     required this.title,
     required this.subtitle,
@@ -104,6 +89,7 @@ class _StashYarnItem {
     required this.amountOwned,
   });
 
+  final Yarn yarn;
   final String imageUrl;
   final String title;
   final String subtitle;
@@ -117,6 +103,10 @@ class _StashYarnItem {
 _StashYarnItem _stashItemFromYarn(Yarn yarn) {
   final colorway = yarn.colorway?.trim();
   final balls = yarn.skeinCount == 1 ? '1 ball' : '${yarn.skeinCount} balls';
+  final fiberFilters = {
+    for (final fiberContent in yarn.fiberContents)
+      if (fiberContent.fiber.trim().isNotEmpty) fiberContent.fiber.trim(),
+  };
   final subtitleParts = [
     if (colorway != null && colorway.isNotEmpty) colorway,
     balls,
@@ -124,7 +114,10 @@ _StashYarnItem _stashItemFromYarn(Yarn yarn) {
   final filters = <String>{
     if (yarn.weightCategory != null && yarn.weightCategory!.trim().isNotEmpty)
       yarn.weightCategory!.trim(),
-    if (yarn.fiberContent != null && yarn.fiberContent!.trim().isNotEmpty)
+    ...fiberFilters,
+    if (fiberFilters.isEmpty &&
+        yarn.fiberContent != null &&
+        yarn.fiberContent!.trim().isNotEmpty)
       yarn.fiberContent!.trim(),
     if (yarn.colorFamily != null && yarn.colorFamily!.trim().isNotEmpty)
       yarn.colorFamily!.trim(),
@@ -137,6 +130,7 @@ _StashYarnItem _stashItemFromYarn(Yarn yarn) {
   };
 
   return _StashYarnItem(
+    yarn: yarn,
     imageUrl: yarn.imageUrls.isEmpty ? '' : yarn.imageUrls.first,
     title: yarn.name.trim().isEmpty ? yarn.brandName : yarn.name,
     subtitle: subtitleParts.isEmpty
@@ -759,7 +753,7 @@ class CollectionScreen extends StatefulWidget {
   });
 
   final String userId;
-  final VoidCallback onYarnTap;
+  final ValueChanged<Yarn> onYarnTap;
   final VoidCallback onAddYarn;
   final YarnRepository? yarnRepository;
 
@@ -921,7 +915,7 @@ class _CollectionScreenState extends State<CollectionScreen> {
                     title: item.title,
                     subtitle: item.subtitle,
                     fallbackColor: item.fallbackColor,
-                    onTap: widget.onYarnTap,
+                    onTap: () => widget.onYarnTap(item.yarn),
                   ),
               ],
             );
@@ -1470,15 +1464,97 @@ class SearchCatalogScreen extends StatelessWidget {
 class YarnDetailScreen extends StatelessWidget {
   const YarnDetailScreen({
     super.key,
+    required this.userId,
+    required this.collectionId,
+    required this.yarnId,
+    required this.onBack,
+    required this.onEdit,
+    this.yarnRepository,
+  });
+
+  final String userId;
+  final String collectionId;
+  final String? yarnId;
+  final VoidCallback onBack;
+  final VoidCallback onEdit;
+  final YarnRepository? yarnRepository;
+
+  @override
+  Widget build(BuildContext context) {
+    final selectedYarnId = yarnId;
+    if (selectedYarnId == null) {
+      return _YarnDetailMessageState(
+        onBack: onBack,
+        title: 'No yarn selected',
+        message: 'Choose a yarn from your stash to view its saved details.',
+      );
+    }
+
+    final repository = yarnRepository ?? YarnRepository();
+    return StreamBuilder<Yarn?>(
+      stream: repository.watchYarn(
+        uid: userId,
+        collectionId: collectionId,
+        yarnId: selectedYarnId,
+      ),
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return _YarnDetailMessageState(
+            onBack: onBack,
+            title: 'Unable to load yarn',
+            message: 'Try returning to your stash and opening it again.',
+          );
+        }
+
+        if (snapshot.connectionState == ConnectionState.waiting &&
+            !snapshot.hasData) {
+          return ListView(
+            padding: const EdgeInsets.only(bottom: 28),
+            children: [
+              NavRow(
+                leading: CircleIconButton(
+                  icon: FontAwesomeIcons.chevronLeft,
+                  onTap: onBack,
+                ),
+              ),
+              const SizedBox(height: 96),
+              const Center(
+                child: CircularProgressIndicator(color: AppColors.accent),
+              ),
+            ],
+          );
+        }
+
+        final yarn = snapshot.data;
+        if (yarn == null) {
+          return _YarnDetailMessageState(
+            onBack: onBack,
+            title: 'Yarn not found',
+            message: 'This yarn may have been removed from your stash.',
+          );
+        }
+
+        return _YarnDetailContent(yarn: yarn, onBack: onBack, onEdit: onEdit);
+      },
+    );
+  }
+}
+
+class _YarnDetailContent extends StatelessWidget {
+  const _YarnDetailContent({
+    required this.yarn,
     required this.onBack,
     required this.onEdit,
   });
 
+  final Yarn yarn;
   final VoidCallback onBack;
   final VoidCallback onEdit;
 
   @override
   Widget build(BuildContext context) {
+    final imageUrl = yarn.imageUrls.isEmpty ? '' : yarn.imageUrls.first;
+
     return ListView(
       padding: const EdgeInsets.only(bottom: 28),
       children: [
@@ -1493,15 +1569,15 @@ class YarnDetailScreen extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 16),
-        const YarnPhoto(
-          url: _imgDetail,
+        YarnPhoto(
+          url: imageUrl,
           width: double.infinity,
           height: 256,
           radius: 34,
-          fallbackColor: Color(0xFFB8D6E8),
+          fallbackColor: _fallbackColorForYarn(yarn),
         ),
         const SizedBox(height: 20),
-        const Row(
+        Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Expanded(
@@ -1509,18 +1585,18 @@ class YarnDetailScreen extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Malabrigo Rios',
-                    style: TextStyle(
+                    _yarnTitle(yarn),
+                    style: const TextStyle(
                       fontSize: 30,
                       height: 1.08,
                       fontWeight: FontWeight.w900,
                       letterSpacing: tightLetterSpacing,
                     ),
                   ),
-                  SizedBox(height: 4),
+                  const SizedBox(height: 4),
                   Text(
-                    'Aguas - Malabrigo Yarn',
-                    style: TextStyle(
+                    _yarnSubtitle(yarn),
+                    style: const TextStyle(
                       color: AppColors.muted,
                       fontSize: 15,
                       fontWeight: FontWeight.w800,
@@ -1530,41 +1606,48 @@ class YarnDetailScreen extends StatelessWidget {
                 ],
               ),
             ),
-            SizedBox(width: 12),
-            StashChip(label: 'In stash', active: true),
+            const SizedBox(width: 12),
+            StashChip(label: _statusLabel(yarn.status), active: true),
           ],
         ),
         const SizedBox(height: 20),
-        const Row(
+        Row(
           children: [
             Expanded(
-              child: StatCard(value: '4', label: 'Balls'),
+              child: StatCard(
+                value: yarn.skeinCount.toString(),
+                label: 'Skeins',
+              ),
             ),
-            SizedBox(width: 12),
+            const SizedBox(width: 12),
             Expanded(
-              child: StatCard(value: '840', label: 'Yards'),
+              child: StatCard(value: _totalYardageStat(yarn), label: 'Yards'),
             ),
-            SizedBox(width: 12),
+            const SizedBox(width: 12),
             Expanded(
-              child: StatCard(value: '400g', label: 'Total'),
+              child: StatCard(value: _totalWeightStat(yarn), label: 'Weight'),
             ),
           ],
         ),
         const SizedBox(height: 24),
+        const SectionTitle('Fiber content'),
+        const SizedBox(height: 12),
+        _FiberContentSummary(yarn: yarn),
+        const SizedBox(height: 24),
         const SectionTitle('Details'),
         const SizedBox(height: 12),
-        const _InfoGrid(items: _detailFields),
+        _InfoGrid(items: _detailItemsForYarn(yarn)),
         const SizedBox(height: 16),
-        const CardSurface(
-          padding: EdgeInsets.all(16),
+        CardSurface(
+          padding: const EdgeInsets.all(16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              FieldLabel('Notes'),
-              SizedBox(height: 8),
+              const FieldLabel('Notes'),
+              const SizedBox(height: 8),
               Text(
-                'Soft, saturated color. Keep together for cardigan yardage.',
-                style: TextStyle(
+                _valueOrFallback(yarn.notes, fallback: 'No notes yet.'),
+                style: const TextStyle(
                   color: Color(0xFF5F5148),
                   fontSize: 15,
                   height: 1.35,
@@ -1578,6 +1661,253 @@ class YarnDetailScreen extends StatelessWidget {
       ],
     );
   }
+}
+
+class _FiberContentSummary extends StatelessWidget {
+  const _FiberContentSummary({required this.yarn});
+
+  final Yarn yarn;
+
+  @override
+  Widget build(BuildContext context) {
+    final legacyFiberContent = yarn.fiberContent?.trim();
+
+    return CardSurface(
+      radius: 20,
+      padding: const EdgeInsets.all(16),
+      child: yarn.fiberContents.isEmpty
+          ? Text(
+              legacyFiberContent != null && legacyFiberContent.isNotEmpty
+                  ? legacyFiberContent
+                  : 'Not set',
+              style: const TextStyle(
+                color: AppColors.ink,
+                fontSize: 16,
+                fontWeight: FontWeight.w800,
+                letterSpacing: tightLetterSpacing,
+              ),
+            )
+          : Column(
+              children: [
+                for (var index = 0; index < yarn.fiberContents.length; index++)
+                  Padding(
+                    padding: EdgeInsets.only(
+                      bottom: index == yarn.fiberContents.length - 1 ? 0 : 14,
+                    ),
+                    child: _FiberContentDisplayRow(
+                      fiberContent: yarn.fiberContents[index],
+                      color: _fiberDisplayColor(index),
+                    ),
+                  ),
+              ],
+            ),
+    );
+  }
+}
+
+class _FiberContentDisplayRow extends StatelessWidget {
+  const _FiberContentDisplayRow({
+    required this.fiberContent,
+    required this.color,
+  });
+
+  final YarnFiberContent fiberContent;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    final widthFactor = fiberContent.percentage.clamp(0, 100) / 100;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                fiberContent.fiber,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: tightLetterSpacing,
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.18),
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: Text(
+                '${fiberContent.percentage}%',
+                style: TextStyle(
+                  color: color,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: tightLetterSpacing,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(999),
+          child: Container(
+            height: 8,
+            color: AppColors.line,
+            alignment: Alignment.centerLeft,
+            child: FractionallySizedBox(
+              widthFactor: widthFactor.toDouble(),
+              child: Container(color: color),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _YarnDetailMessageState extends StatelessWidget {
+  const _YarnDetailMessageState({
+    required this.onBack,
+    required this.title,
+    required this.message,
+  });
+
+  final VoidCallback onBack;
+  final String title;
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.only(bottom: 28),
+      children: [
+        NavRow(
+          leading: CircleIconButton(
+            icon: FontAwesomeIcons.chevronLeft,
+            onTap: onBack,
+          ),
+        ),
+        const SizedBox(height: 96),
+        Text(
+          title,
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            fontSize: 22,
+            fontWeight: FontWeight.w900,
+            letterSpacing: tightLetterSpacing,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          message,
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            color: AppColors.muted,
+            fontSize: 15,
+            fontWeight: FontWeight.w700,
+            letterSpacing: tightLetterSpacing,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+String _yarnTitle(Yarn yarn) {
+  final name = yarn.name.trim();
+  if (name.isNotEmpty) return name;
+
+  final brandName = yarn.brandName.trim();
+  return brandName.isEmpty ? 'Unnamed yarn' : brandName;
+}
+
+String _yarnSubtitle(Yarn yarn) {
+  final colorway = _cleanText(yarn.colorway);
+  final brandName = _cleanText(yarn.brandName);
+  final parts = [?colorway, ?brandName];
+
+  return parts.isEmpty ? 'No brand saved' : parts.join(' - ');
+}
+
+String _statusLabel(YarnStatus status) {
+  return switch (status) {
+    YarnStatus.inStash => 'In stash',
+    YarnStatus.inProject => 'In project',
+    YarnStatus.usedUp => 'Used up',
+    YarnStatus.destashed => 'Destashed',
+  };
+}
+
+List<InfoItem> _detailItemsForYarn(Yarn yarn) {
+  return [
+    InfoItem('Brand', _valueOrFallback(yarn.brandName)),
+    InfoItem('Weight', _valueOrFallback(yarn.weightCategory)),
+    InfoItem('WPI', yarn.wpi?.toString() ?? 'Not set'),
+    InfoItem('Yardage', _yardageText(yarn.yardage)),
+    InfoItem('Unit weight', _unitWeightText(yarn.unitWeightGrams)),
+    InfoItem('Needle', _valueOrFallback(yarn.needleSize)),
+    InfoItem('Gauge', _valueOrFallback(yarn.gauge)),
+    InfoItem('Color family', _valueOrFallback(yarn.colorFamily)),
+    InfoItem('Colorway', _valueOrFallback(yarn.colorway)),
+    InfoItem('Dye lot', _valueOrFallback(yarn.dyeLot)),
+    InfoItem('Skeins', yarn.skeinCount.toString()),
+    InfoItem('Price', _priceText(yarn.priceCents)),
+    InfoItem(
+      'Folder',
+      _valueOrFallback(yarn.folderName, fallback: 'No folder'),
+    ),
+  ];
+}
+
+String _totalYardageStat(Yarn yarn) {
+  final yardage = yarn.yardage;
+  if (yardage == null) return '--';
+  return (yardage * yarn.skeinCount).toString();
+}
+
+String _totalWeightStat(Yarn yarn) {
+  final grams = yarn.unitWeightGrams;
+  if (grams == null) return '--';
+  return '${grams * yarn.skeinCount}g';
+}
+
+String _yardageText(int? yardage) {
+  return yardage == null ? 'Not set' : '$yardage yd';
+}
+
+String _unitWeightText(int? grams) {
+  return grams == null ? 'Not set' : '$grams g';
+}
+
+String _priceText(int? priceCents) {
+  if (priceCents == null) return 'Not set';
+  return '\$${(priceCents / 100).toStringAsFixed(2)}';
+}
+
+String _valueOrFallback(String? value, {String fallback = 'Not set'}) {
+  return _cleanText(value) ?? fallback;
+}
+
+String? _cleanText(String? value) {
+  final trimmed = value?.trim();
+  if (trimmed == null || trimmed.isEmpty) return null;
+  return trimmed;
+}
+
+Color _fiberDisplayColor(int index) {
+  return switch (index % 4) {
+    0 => AppColors.accentDark,
+    1 => const Color(0xFF587456),
+    2 => const Color(0xFF6D579A),
+    _ => const Color(0xFFA87523),
+  };
 }
 
 class YarnFormScreen extends StatefulWidget {
@@ -1617,6 +1947,7 @@ class _YarnFormScreenState extends State<YarnFormScreen> {
   late final TextEditingController _ballsController;
   late final TextEditingController _priceController;
   late final TextEditingController _notesController;
+  final List<_FiberContentInput> _fiberRows = [];
 
   String? _colorFamily;
   late String _folder;
@@ -1666,6 +1997,12 @@ class _YarnFormScreenState extends State<YarnFormScreen> {
     _notesController = TextEditingController(
       text: widget.startBlank ? '' : 'Reserved for the Weekender sweater.',
     );
+    _fiberRows.add(
+      _FiberContentInput(
+        fiber: widget.startBlank ? '' : 'Merino',
+        percentage: widget.startBlank ? '' : '100',
+      ),
+    );
   }
 
   int? _parseFirstInt(String value) {
@@ -1687,6 +2024,63 @@ class _YarnFormScreenState extends State<YarnFormScreen> {
     return trimmed.isEmpty ? null : trimmed;
   }
 
+  void _addFiberRow() {
+    setState(() => _fiberRows.add(_FiberContentInput()));
+  }
+
+  void _removeFiberRow(int index) {
+    final removed = _fiberRows[index];
+    setState(() => _fiberRows.removeAt(index));
+    removed.dispose();
+  }
+
+  List<YarnFiberContent>? _validatedFiberContents() {
+    final fiberContents = <YarnFiberContent>[];
+
+    for (final row in _fiberRows) {
+      final fiber = row.fiberController.text.trim();
+      final percentageText = row.percentageController.text.trim();
+      if (fiber.isEmpty && percentageText.isEmpty) continue;
+
+      final percentage = _parseFirstInt(percentageText);
+      if (fiber.isEmpty || percentage == null || percentage <= 0) {
+        setState(() {
+          _errorMessage =
+              'Each fiber needs a name and a percentage from 1 to 100.';
+        });
+        return null;
+      }
+      if (percentage > 100) {
+        setState(() {
+          _errorMessage = 'Fiber percentages must be between 1 and 100.';
+        });
+        return null;
+      }
+
+      fiberContents.add(YarnFiberContent(fiber: fiber, percentage: percentage));
+    }
+
+    if (fiberContents.isEmpty) {
+      setState(() {
+        _errorMessage = 'Add at least one fiber and percentage.';
+      });
+      return null;
+    }
+
+    final totalPercentage = fiberContents.fold<int>(
+      0,
+      (total, fiberContent) => total + fiberContent.percentage,
+    );
+    if (totalPercentage != 100) {
+      setState(() {
+        _errorMessage = 'Fiber percentages must add up to 100%.';
+      });
+      return null;
+    }
+
+    return fiberContents;
+  }
+
   Future<void> _saveYarn() async {
     if (widget.isEditing) {
       widget.onPrimary();
@@ -1706,6 +2100,9 @@ class _YarnFormScreenState extends State<YarnFormScreen> {
       return;
     }
 
+    final fiberContents = _validatedFiberContents();
+    if (fiberContents == null) return;
+
     setState(() {
       _isSaving = true;
       _errorMessage = null;
@@ -1713,6 +2110,7 @@ class _YarnFormScreenState extends State<YarnFormScreen> {
 
     final now = DateTime.now();
     final folderName = _folder == 'No folder' ? null : _folder;
+    final fiberContent = yarnFiberContentSummary(fiberContents);
 
     try {
       await _yarnRepository.createYarn(
@@ -1728,6 +2126,8 @@ class _YarnFormScreenState extends State<YarnFormScreen> {
           dyeLot: _trimmedOrNull(_dyeLotController.text),
           weightCategory: _trimmedOrNull(_weightController.text),
           wpi: _parseFirstInt(_wpiController.text),
+          fiberContent: fiberContent,
+          fiberContents: fiberContents,
           yardage: _parseFirstInt(_lengthController.text),
           unitWeightGrams: _parseFirstInt(_unitWeightController.text),
           needleSize: _trimmedOrNull(_needleController.text),
@@ -1773,6 +2173,9 @@ class _YarnFormScreenState extends State<YarnFormScreen> {
     _ballsController.dispose();
     _priceController.dispose();
     _notesController.dispose();
+    for (final fiberRow in _fiberRows) {
+      fiberRow.dispose();
+    }
     super.dispose();
   }
 
@@ -1813,6 +2216,52 @@ class _YarnFormScreenState extends State<YarnFormScreen> {
           child: InlineTextField(controller: _gaugeController),
         ),
       ],
+    );
+  }
+
+  Widget _fiberContentField() {
+    return InfoField(
+      label: 'Fiber content',
+      minHeight: 112,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Expanded(child: FieldLabel('Fiber')),
+              SizedBox(width: 12),
+              SizedBox(width: 92, child: FieldLabel('%')),
+              SizedBox(width: 38),
+            ],
+          ),
+          const SizedBox(height: 6),
+          for (var index = 0; index < _fiberRows.length; index++) ...[
+            _FiberContentRow(
+              fiberController: _fiberRows[index].fiberController,
+              percentageController: _fiberRows[index].percentageController,
+              onRemove: _fiberRows.length > 1
+                  ? () => _removeFiberRow(index)
+                  : null,
+            ),
+            if (index != _fiberRows.length - 1) const SizedBox(height: 10),
+          ],
+          const SizedBox(height: 10),
+          TextButton.icon(
+            onPressed: _addFiberRow,
+            style: TextButton.styleFrom(
+              foregroundColor: AppColors.accentDark,
+              minimumSize: const Size(0, 32),
+              padding: EdgeInsets.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            icon: const FaIcon(FontAwesomeIcons.plus, size: 12),
+            label: const Text(
+              'Add fiber',
+              style: TextStyle(fontWeight: FontWeight.w900),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -1866,7 +2315,9 @@ class _YarnFormScreenState extends State<YarnFormScreen> {
           ),
         ),
         const SizedBox(height: 24),
-        const SectionTitle('Autofilled details'),
+        const SectionTitle('Yarn details'),
+        const SizedBox(height: 12),
+        _fiberContentField(),
         const SizedBox(height: 12),
         _editableAutofillGrid(),
         const SizedBox(height: 24),
@@ -1990,6 +2441,118 @@ class _YarnFormScreenState extends State<YarnFormScreen> {
           ),
         ],
       ],
+    );
+  }
+}
+
+class _FiberContentInput {
+  _FiberContentInput({String fiber = '', String percentage = ''})
+    : fiberController = TextEditingController(text: fiber),
+      percentageController = TextEditingController(text: percentage);
+
+  final TextEditingController fiberController;
+  final TextEditingController percentageController;
+
+  void dispose() {
+    fiberController.dispose();
+    percentageController.dispose();
+  }
+}
+
+class _FiberContentRow extends StatelessWidget {
+  const _FiberContentRow({
+    required this.fiberController,
+    required this.percentageController,
+    this.onRemove,
+  });
+
+  final TextEditingController fiberController;
+  final TextEditingController percentageController;
+  final VoidCallback? onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: _FiberInputBox(
+            child: InlineTextField(
+              controller: fiberController,
+              hintText: 'Merino',
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
+        SizedBox(
+          width: 92,
+          child: _FiberInputBox(
+            child: Row(
+              children: [
+                Expanded(
+                  child: InlineTextField(
+                    controller: percentageController,
+                    keyboardType: TextInputType.number,
+                    hintText: '100',
+                  ),
+                ),
+                const SizedBox(width: 4),
+                const Text(
+                  '%',
+                  style: TextStyle(
+                    color: AppColors.accentDark,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: tightLetterSpacing,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        SizedBox(
+          width: 38,
+          height: 44,
+          child: onRemove == null
+              ? const SizedBox.shrink()
+              : IconButton(
+                  tooltip: 'Remove fiber',
+                  onPressed: onRemove,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints.tightFor(
+                    width: 36,
+                    height: 44,
+                  ),
+                  icon: const FaIcon(
+                    FontAwesomeIcons.xmark,
+                    size: 14,
+                    color: AppColors.muted,
+                  ),
+                ),
+        ),
+      ],
+    );
+  }
+}
+
+class _FiberInputBox extends StatelessWidget {
+  const _FiberInputBox({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 44,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: AppColors.cream,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: AppColors.accent.withValues(alpha: 0.35),
+          width: 1.3,
+        ),
+      ),
+      child: child,
     );
   }
 }

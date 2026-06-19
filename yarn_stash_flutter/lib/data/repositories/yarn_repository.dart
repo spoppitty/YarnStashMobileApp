@@ -41,6 +41,18 @@ class YarnRepository {
     });
   }
 
+  Stream<Yarn?> watchYarn({
+    required String uid,
+    required String collectionId,
+    required String yarnId,
+  }) {
+    return yarnRef(
+      uid: uid,
+      collectionId: collectionId,
+      yarnId: yarnId,
+    ).snapshots().map((snapshot) => snapshot.data());
+  }
+
   Future<Yarn> createYarn({
     required String uid,
     String collectionId = FirestoreDocumentIds.defaultStashCollection,

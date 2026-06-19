@@ -20,6 +20,51 @@ enum YarnStatus {
   }
 }
 
+class YarnFiberContent {
+  const YarnFiberContent({required this.fiber, required this.percentage});
+
+  final String fiber;
+  final int percentage;
+
+  factory YarnFiberContent.fromFirestore(Object? value) {
+    if (value is! Map) {
+      return const YarnFiberContent(fiber: '', percentage: 0);
+    }
+
+    final fiber = value['fiber'];
+    return YarnFiberContent(
+      fiber: fiber is String ? fiber : '',
+      percentage: intFromFirestore(value['percentage']),
+    );
+  }
+
+  Map<String, dynamic> toFirestore() {
+    return {'fiber': fiber, 'percentage': percentage};
+  }
+}
+
+List<YarnFiberContent> yarnFiberContentsFromFirestore(Object? value) {
+  if (value is Iterable) {
+    return value
+        .map(YarnFiberContent.fromFirestore)
+        .where(
+          (fiberContent) =>
+              fiberContent.fiber.trim().isNotEmpty &&
+              fiberContent.percentage > 0,
+        )
+        .toList(growable: false);
+  }
+  return const [];
+}
+
+String yarnFiberContentSummary(List<YarnFiberContent> fiberContents) {
+  return fiberContents
+      .map(
+        (fiberContent) => '${fiberContent.percentage}% ${fiberContent.fiber}',
+      )
+      .join(', ');
+}
+
 class Yarn {
   const Yarn({
     required this.id,
@@ -33,6 +78,7 @@ class Yarn {
     this.weightCategory,
     this.wpi,
     this.fiberContent,
+    this.fiberContents = const [],
     this.yardage,
     this.unitWeightGrams,
     this.needleSize,
@@ -59,6 +105,7 @@ class Yarn {
   final String? weightCategory;
   final int? wpi;
   final String? fiberContent;
+  final List<YarnFiberContent> fiberContents;
   final int? yardage;
   final int? unitWeightGrams;
   final String? needleSize;
@@ -76,6 +123,8 @@ class Yarn {
   factory Yarn.fromFirestore(DocumentSnapshot<Map<String, dynamic>> doc) {
     final data = doc.data() ?? const <String, dynamic>{};
     final now = DateTime.now();
+    final fiberContents = yarnFiberContentsFromFirestore(data['fiberContents']);
+    final fiberContent = data['fiberContent'] as String?;
 
     return Yarn(
       id: doc.id,
@@ -88,7 +137,12 @@ class Yarn {
       dyeLot: data['dyeLot'] as String?,
       weightCategory: data['weightCategory'] as String?,
       wpi: data['wpi'] == null ? null : intFromFirestore(data['wpi']),
-      fiberContent: data['fiberContent'] as String?,
+      fiberContent:
+          fiberContent ??
+          (fiberContents.isEmpty
+              ? null
+              : yarnFiberContentSummary(fiberContents)),
+      fiberContents: fiberContents,
       yardage: data['yardage'] == null
           ? null
           : intFromFirestore(data['yardage']),
@@ -112,6 +166,10 @@ class Yarn {
   }
 
   Map<String, dynamic> toFirestore() {
+    final fiberContentSummary =
+        fiberContent ??
+        (fiberContents.isEmpty ? null : yarnFiberContentSummary(fiberContents));
+
     return {
       'ownerUid': ownerUid,
       'collectionId': collectionId,
@@ -122,7 +180,10 @@ class Yarn {
       'dyeLot': dyeLot,
       'weightCategory': weightCategory,
       'wpi': wpi,
-      'fiberContent': fiberContent,
+      'fiberContent': fiberContentSummary,
+      'fiberContents': fiberContents
+          .map((fiberContent) => fiberContent.toFirestore())
+          .toList(growable: false),
       'yardage': yardage,
       'unitWeightGrams': unitWeightGrams,
       'needleSize': needleSize,
@@ -151,6 +212,7 @@ class Yarn {
     String? weightCategory,
     int? wpi,
     String? fiberContent,
+    List<YarnFiberContent>? fiberContents,
     int? yardage,
     int? unitWeightGrams,
     String? needleSize,
@@ -177,6 +239,7 @@ class Yarn {
       weightCategory: weightCategory ?? this.weightCategory,
       wpi: wpi ?? this.wpi,
       fiberContent: fiberContent ?? this.fiberContent,
+      fiberContents: fiberContents ?? this.fiberContents,
       yardage: yardage ?? this.yardage,
       unitWeightGrams: unitWeightGrams ?? this.unitWeightGrams,
       needleSize: needleSize ?? this.needleSize,

@@ -774,12 +774,14 @@ class InlineTextField extends StatelessWidget {
     this.keyboardType,
     this.maxLines = 1,
     this.muted = false,
+    this.hintText,
   });
 
   final TextEditingController controller;
   final TextInputType? keyboardType;
   final int maxLines;
   final bool muted;
+  final String? hintText;
 
   @override
   Widget build(BuildContext context) {
@@ -796,12 +798,18 @@ class InlineTextField extends StatelessWidget {
         fontWeight: muted ? FontWeight.w700 : FontWeight.w800,
         letterSpacing: tightLetterSpacing,
       ),
-      decoration: const InputDecoration(
+      decoration: InputDecoration(
         border: InputBorder.none,
         enabledBorder: InputBorder.none,
         focusedBorder: InputBorder.none,
         isDense: true,
         contentPadding: EdgeInsets.zero,
+        hintText: hintText,
+        hintStyle: const TextStyle(
+          color: AppColors.muted,
+          fontWeight: FontWeight.w700,
+          letterSpacing: tightLetterSpacing,
+        ),
       ),
     );
   }
