@@ -6,7 +6,10 @@ import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 
 import 'app_style.dart';
 import 'components.dart';
+import 'data/firestore_paths.dart';
+import 'data/models/stash_folder.dart';
 import 'data/models/yarn.dart';
+import 'data/repositories/stash_folder_repository.dart';
 import 'data/repositories/yarn_repository.dart';
 import 'data/services/auth_service.dart';
 
@@ -14,10 +17,6 @@ const _imgMerino = 'https://source.unsplash.com/420x420/?merino,yarn,skein';
 const _imgWool = 'https://source.unsplash.com/410x410/?wool,skein';
 const _imgHandDyed = 'https://source.unsplash.com/411x411/?handdyed,yarn';
 const _imgDyed = 'https://source.unsplash.com/412x412/?dyed,yarn';
-const _imgEdit = 'https://source.unsplash.com/430x430/?blue,wool,yarn';
-const _imgFolderGreen = 'https://source.unsplash.com/440x440/?green,yarn,skein';
-const _imgFolderBrown = 'https://source.unsplash.com/441x441/?brown,yarn';
-const _imgFolderCream = 'https://source.unsplash.com/442x442/?cream,wool';
 
 const _allStashFilter = 'All';
 const _stashWeightFilters = ['Worsted', 'Sock'];
@@ -153,6 +152,76 @@ Color _fallbackColorForYarn(Yarn yarn) {
     'white' => AppColors.cream,
     _ => const Color(0xFFB8D6E8),
   };
+}
+
+FaIconData _folderIconForKey(String iconKey) {
+  return switch (iconKey) {
+    'shirt' => FontAwesomeIcons.shirt,
+    'socks' => FontAwesomeIcons.socks,
+    'sun' => FontAwesomeIcons.sun,
+    'boxArchive' => FontAwesomeIcons.boxArchive,
+    'circleCheck' => FontAwesomeIcons.circleCheck,
+    _ => FontAwesomeIcons.folder,
+  };
+}
+
+Color _folderBackgroundColor(StashFolder folder) {
+  return Color(folder.colorValue);
+}
+
+Color _folderForegroundColor(Color background) {
+  return background.computeLuminance() > 0.55 ? AppColors.ink : Colors.white;
+}
+
+List<Yarn> _yarnsForFolder(StashFolder folder, List<Yarn> yarns) {
+  final folderYarnIds = folder.yarnIds.toSet();
+  return yarns
+      .where((yarn) {
+        if (folderYarnIds.contains(yarn.id) ||
+            yarn.folderIds.contains(folder.id)) {
+          return true;
+        }
+
+        if (folder.isDefaultUsedUp && yarn.status == YarnStatus.usedUp) {
+          return true;
+        }
+
+        final folderName = _cleanText(yarn.folderName);
+        return folderName != null && folderName == folder.name;
+      })
+      .toList(growable: false);
+}
+
+int _totalYardageForYarns(List<Yarn> yarns) {
+  return yarns.fold(0, (total, yarn) {
+    final yardage = yarn.yardage;
+    return total + (yardage == null ? 0 : yardage * yarn.skeinCount);
+  });
+}
+
+String _folderSubtitle(StashFolder folder, List<Yarn> yarns) {
+  final count = yarns.length;
+  final countLabel = count == 1 ? '1 yarn' : '$count yarns';
+  final yards = _totalYardageForYarns(yarns);
+
+  if (yards > 0) {
+    return '$countLabel - $yards yd';
+  }
+
+  return folder.isSystem ? '$countLabel - locked' : countLabel;
+}
+
+String _folderYarnSubtitle(Yarn yarn) {
+  final colorway = _cleanText(yarn.colorway);
+  final brandName = _cleanText(yarn.brandName);
+  final skeins = yarn.skeinCount == 1 ? '1 skein' : '${yarn.skeinCount} skeins';
+  return [?colorway, ?brandName, skeins].join(' - ');
+}
+
+String _folderYarnDetail(Yarn yarn) {
+  final yardage = yarn.yardage;
+  if (yardage == null) return _statusLabel(yarn.status);
+  return '${yardage * yarn.skeinCount} yd total';
 }
 
 String? _requiredAuthValue(String? value, String label) {
@@ -1847,7 +1916,6 @@ String _statusLabel(YarnStatus status) {
 
 List<InfoItem> _detailItemsForYarn(Yarn yarn) {
   return [
-    InfoItem('Brand', _valueOrFallback(yarn.brandName)),
     InfoItem('Weight', _valueOrFallback(yarn.weightCategory)),
     InfoItem('WPI', yarn.wpi?.toString() ?? 'Not set'),
     InfoItem('Yardage', _yardageText(yarn.yardage)),
@@ -1859,10 +1927,6 @@ List<InfoItem> _detailItemsForYarn(Yarn yarn) {
     InfoItem('Dye lot', _valueOrFallback(yarn.dyeLot)),
     InfoItem('Skeins', yarn.skeinCount.toString()),
     InfoItem('Price', _priceText(yarn.priceCents)),
-    InfoItem(
-      'Folder',
-      _valueOrFallback(yarn.folderName, fallback: 'No folder'),
-    ),
   ];
 }
 
@@ -1918,7 +1982,10 @@ class YarnFormScreen extends StatefulWidget {
     required this.onBack,
     required this.onPrimary,
     this.startBlank = false,
+    this.collectionId,
+    this.yarnId,
     this.yarnRepository,
+    this.folderRepository,
   });
 
   final bool isEditing;
@@ -1926,7 +1993,10 @@ class YarnFormScreen extends StatefulWidget {
   final VoidCallback onBack;
   final VoidCallback onPrimary;
   final bool startBlank;
+  final String? collectionId;
+  final String? yarnId;
   final YarnRepository? yarnRepository;
+  final StashFolderRepository? folderRepository;
 
   @override
   State<YarnFormScreen> createState() => _YarnFormScreenState();
@@ -1934,6 +2004,7 @@ class YarnFormScreen extends StatefulWidget {
 
 class _YarnFormScreenState extends State<YarnFormScreen> {
   late final YarnRepository _yarnRepository;
+  late final StashFolderRepository _folderRepository;
   late final TextEditingController _yarnNameController;
   late final TextEditingController _brandController;
   late final TextEditingController _weightController;
@@ -1951,6 +2022,10 @@ class _YarnFormScreenState extends State<YarnFormScreen> {
 
   String? _colorFamily;
   late String _folder;
+  String? _selectedFolderId;
+  Yarn? _editingYarn;
+  String? _populatedYarnId;
+  String _selectedImageUrl = '';
   bool _isSaving = false;
   String? _errorMessage;
 
@@ -1958,51 +2033,52 @@ class _YarnFormScreenState extends State<YarnFormScreen> {
   void initState() {
     super.initState();
     _yarnRepository = widget.yarnRepository ?? YarnRepository();
-    _colorFamily = widget.startBlank ? null : 'White';
-    _folder = widget.isEditing ? 'Sweaters' : 'No folder';
-    _yarnNameController = TextEditingController(
-      text: widget.startBlank ? '' : 'Malabrigo Rios',
-    );
-    _brandController = TextEditingController(
-      text: widget.startBlank ? '' : 'Malabrigo Yarn',
-    );
-    _weightController = TextEditingController(
-      text: widget.startBlank ? '' : 'Worsted',
-    );
-    _wpiController = TextEditingController(text: widget.startBlank ? '' : '9');
-    _lengthController = TextEditingController(
-      text: widget.startBlank ? '' : '210 yd',
-    );
-    _unitWeightController = TextEditingController(
-      text: widget.startBlank ? '' : '100 g',
-    );
-    _needleController = TextEditingController(
-      text: widget.startBlank ? '' : 'US 6-8',
-    );
-    _gaugeController = TextEditingController(
-      text: widget.startBlank ? '' : '18-22 sts',
-    );
-    _colorwayController = TextEditingController(
-      text: widget.startBlank ? '' : 'Aguas',
-    );
-    _dyeLotController = TextEditingController(
-      text: widget.startBlank ? '' : 'A27',
-    );
-    _ballsController = TextEditingController(
-      text: widget.startBlank ? '' : '4',
-    );
-    _priceController = TextEditingController(
-      text: widget.startBlank ? '' : r'$14.50',
-    );
-    _notesController = TextEditingController(
-      text: widget.startBlank ? '' : 'Reserved for the Weekender sweater.',
-    );
-    _fiberRows.add(
-      _FiberContentInput(
-        fiber: widget.startBlank ? '' : 'Merino',
-        percentage: widget.startBlank ? '' : '100',
-      ),
-    );
+    _folderRepository = widget.folderRepository ?? StashFolderRepository();
+    _colorFamily = null;
+    _folder = 'No folder';
+    _yarnNameController = TextEditingController();
+    _brandController = TextEditingController();
+    _weightController = TextEditingController();
+    _wpiController = TextEditingController();
+    _lengthController = TextEditingController();
+    _unitWeightController = TextEditingController();
+    _needleController = TextEditingController();
+    _gaugeController = TextEditingController();
+    _colorwayController = TextEditingController();
+    _dyeLotController = TextEditingController();
+    _ballsController = TextEditingController();
+    _priceController = TextEditingController();
+    _notesController = TextEditingController();
+
+    if (widget.isEditing) {
+      _replaceFiberRows([_FiberContentInput()]);
+    } else {
+      _seedCreateForm();
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant YarnFormScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.isEditing != oldWidget.isEditing ||
+        widget.startBlank != oldWidget.startBlank ||
+        widget.collectionId != oldWidget.collectionId ||
+        widget.yarnId != oldWidget.yarnId) {
+      _errorMessage = null;
+      _isSaving = false;
+      if (widget.isEditing) {
+        _editingYarn = null;
+        _populatedYarnId = null;
+        _selectedImageUrl = '';
+        _colorFamily = null;
+        _folder = 'No folder';
+        _selectedFolderId = null;
+        _clearControllers();
+        _replaceFiberRows([_FiberContentInput()]);
+      } else {
+        _seedCreateForm();
+      }
+    }
   }
 
   int? _parseFirstInt(String value) {
@@ -2022,6 +2098,192 @@ class _YarnFormScreenState extends State<YarnFormScreen> {
   String? _trimmedOrNull(String value) {
     final trimmed = value.trim();
     return trimmed.isEmpty ? null : trimmed;
+  }
+
+  String _optionalIntInputText(int? value, String suffix) {
+    return value == null ? '' : '$value $suffix';
+  }
+
+  String _priceInputText(int? priceCents) {
+    return priceCents == null
+        ? ''
+        : '\$${(priceCents / 100).toStringAsFixed(2)}';
+  }
+
+  List<String> get _colorFamilyItems {
+    final colorFamily = _colorFamily;
+    if (colorFamily == null || _colorFamilyOptions.contains(colorFamily)) {
+      return _colorFamilyOptions;
+    }
+    return [colorFamily, ..._colorFamilyOptions];
+  }
+
+  List<String> _folderOptions(List<StashFolder> folders) {
+    final names = [
+      for (final folder in folders)
+        if (folder.name.trim().isNotEmpty) folder.name.trim(),
+    ];
+    final options = <String>[
+      ...names,
+      if (_folder != 'No folder' && !names.contains(_folder)) _folder,
+      'No folder',
+    ];
+    return options.toSet().toList(growable: false);
+  }
+
+  StashFolder? _selectedFolder(List<StashFolder> folders) {
+    final selectedFolderId = _selectedFolderId;
+    if (selectedFolderId != null) {
+      for (final folder in folders) {
+        if (folder.id == selectedFolderId) return folder;
+      }
+    }
+
+    for (final folder in folders) {
+      if (folder.name == _folder) return folder;
+    }
+
+    return null;
+  }
+
+  void _selectFolder(String? folderName, List<StashFolder> folders) {
+    final name = folderName ?? _folder;
+    final folder = folders.cast<StashFolder?>().firstWhere(
+      (folder) => folder?.name == name,
+      orElse: () => null,
+    );
+
+    setState(() {
+      _folder = name;
+      _selectedFolderId = folder?.id;
+      if (name == 'No folder') {
+        _selectedFolderId = null;
+      }
+    });
+  }
+
+  void _syncSelectedFolderName(List<StashFolder> folders) {
+    final selectedFolderId = _selectedFolderId;
+    if (selectedFolderId == null) return;
+
+    for (final folder in folders) {
+      if (folder.id == selectedFolderId) {
+        _folder = folder.name;
+        return;
+      }
+    }
+  }
+
+  void _clearControllers() {
+    _yarnNameController.clear();
+    _brandController.clear();
+    _weightController.clear();
+    _wpiController.clear();
+    _lengthController.clear();
+    _unitWeightController.clear();
+    _needleController.clear();
+    _gaugeController.clear();
+    _colorwayController.clear();
+    _dyeLotController.clear();
+    _ballsController.clear();
+    _priceController.clear();
+    _notesController.clear();
+  }
+
+  void _replaceFiberRows(List<_FiberContentInput> rows) {
+    for (final row in _fiberRows) {
+      row.dispose();
+    }
+    _fiberRows
+      ..clear()
+      ..addAll(rows.isEmpty ? [_FiberContentInput()] : rows);
+  }
+
+  void _seedCreateForm() {
+    final seedCatalogYarn = !widget.startBlank;
+    _editingYarn = null;
+    _populatedYarnId = null;
+    _selectedImageUrl = seedCatalogYarn ? _imgMerino : '';
+    _colorFamily = seedCatalogYarn ? 'White' : null;
+    _folder = 'No folder';
+    _selectedFolderId = null;
+    _yarnNameController.text = seedCatalogYarn ? 'Malabrigo Rios' : '';
+    _brandController.text = seedCatalogYarn ? 'Malabrigo Yarn' : '';
+    _weightController.text = seedCatalogYarn ? 'Worsted' : '';
+    _wpiController.text = seedCatalogYarn ? '9' : '';
+    _lengthController.text = seedCatalogYarn ? '210 yd' : '';
+    _unitWeightController.text = seedCatalogYarn ? '100 g' : '';
+    _needleController.text = seedCatalogYarn ? 'US 6-8' : '';
+    _gaugeController.text = seedCatalogYarn ? '18-22 sts' : '';
+    _colorwayController.text = seedCatalogYarn ? 'Aguas' : '';
+    _dyeLotController.text = seedCatalogYarn ? 'A27' : '';
+    _ballsController.text = seedCatalogYarn ? '4' : '';
+    _priceController.text = seedCatalogYarn ? r'$14.50' : '';
+    _notesController.text = seedCatalogYarn
+        ? 'Reserved for the Weekender sweater.'
+        : '';
+    _replaceFiberRows([
+      _FiberContentInput(
+        fiber: seedCatalogYarn ? 'Merino' : '',
+        percentage: seedCatalogYarn ? '100' : '',
+      ),
+    ]);
+  }
+
+  List<_FiberContentInput> _fiberRowsForYarn(Yarn yarn) {
+    if (yarn.fiberContents.isNotEmpty) {
+      return [
+        for (final fiberContent in yarn.fiberContents)
+          _FiberContentInput(
+            fiber: fiberContent.fiber,
+            percentage: fiberContent.percentage.toString(),
+          ),
+      ];
+    }
+
+    final legacyFiberContent = yarn.fiberContent?.trim();
+    if (legacyFiberContent == null || legacyFiberContent.isEmpty) {
+      return [_FiberContentInput()];
+    }
+
+    final rows = <_FiberContentInput>[];
+    for (final part in legacyFiberContent.split(',')) {
+      final match = RegExp(r'^\s*(\d+)\s*%\s*(.+?)\s*$').firstMatch(part);
+      if (match == null) continue;
+      rows.add(
+        _FiberContentInput(fiber: match.group(2)!, percentage: match.group(1)!),
+      );
+    }
+
+    return rows.isEmpty ? [_FiberContentInput()] : rows;
+  }
+
+  void _populateFormFromYarn(Yarn yarn) {
+    if (_populatedYarnId == yarn.id) return;
+
+    _editingYarn = yarn;
+    _populatedYarnId = yarn.id;
+    _selectedImageUrl = yarn.imageUrls.isEmpty ? '' : yarn.imageUrls.first;
+    _colorFamily = _cleanText(yarn.colorFamily);
+    _folder = _cleanText(yarn.folderName) ?? 'No folder';
+    _selectedFolderId = yarn.folderIds.isEmpty ? null : yarn.folderIds.first;
+    _yarnNameController.text = yarn.name;
+    _brandController.text = yarn.brandName;
+    _weightController.text = yarn.weightCategory ?? '';
+    _wpiController.text = yarn.wpi?.toString() ?? '';
+    _lengthController.text = _optionalIntInputText(yarn.yardage, 'yd');
+    _unitWeightController.text = _optionalIntInputText(
+      yarn.unitWeightGrams,
+      'g',
+    );
+    _needleController.text = yarn.needleSize ?? '';
+    _gaugeController.text = yarn.gauge ?? '';
+    _colorwayController.text = yarn.colorway ?? '';
+    _dyeLotController.text = yarn.dyeLot ?? '';
+    _ballsController.text = yarn.skeinCount.toString();
+    _priceController.text = _priceInputText(yarn.priceCents);
+    _notesController.text = yarn.notes ?? '';
+    _replaceFiberRows(_fiberRowsForYarn(yarn));
   }
 
   void _addFiberRow() {
@@ -2081,12 +2343,7 @@ class _YarnFormScreenState extends State<YarnFormScreen> {
     return fiberContents;
   }
 
-  Future<void> _saveYarn() async {
-    if (widget.isEditing) {
-      widget.onPrimary();
-      return;
-    }
-
+  Future<void> _saveYarn(List<StashFolder> folders) async {
     if (_isSaving) return;
     FocusScope.of(context).unfocus();
 
@@ -2109,53 +2366,406 @@ class _YarnFormScreenState extends State<YarnFormScreen> {
     });
 
     final now = DateTime.now();
-    final folderName = _folder == 'No folder' ? null : _folder;
+    final selectedFolder = _selectedFolder(folders);
+    final selectedFolderId = selectedFolder?.id ?? _selectedFolderId;
+    final hasFolder = _folder != 'No folder' && selectedFolderId != null;
+    final folderName = hasFolder ? selectedFolder?.name ?? _folder : null;
+    final folderIds = hasFolder ? [selectedFolderId] : const <String>[];
     final fiberContent = yarnFiberContentSummary(fiberContents);
 
     try {
-      await _yarnRepository.createYarn(
-        uid: widget.userId,
-        yarn: Yarn(
-          id: '',
-          ownerUid: widget.userId,
-          collectionId: '',
-          brandName: brand,
-          name: yarnName,
-          colorway: _trimmedOrNull(_colorwayController.text),
-          colorFamily: _colorFamily,
-          dyeLot: _trimmedOrNull(_dyeLotController.text),
-          weightCategory: _trimmedOrNull(_weightController.text),
-          wpi: _parseFirstInt(_wpiController.text),
-          fiberContent: fiberContent,
-          fiberContents: fiberContents,
-          yardage: _parseFirstInt(_lengthController.text),
-          unitWeightGrams: _parseFirstInt(_unitWeightController.text),
-          needleSize: _trimmedOrNull(_needleController.text),
-          gauge: _trimmedOrNull(_gaugeController.text),
-          skeinCount: _parseFirstInt(_ballsController.text) ?? 1,
-          priceCents: _parsePriceCents(_priceController.text),
-          folderName: folderName,
-          notes: _trimmedOrNull(_notesController.text),
-          createdAt: now,
-          updatedAt: now,
-        ),
-      );
+      if (widget.isEditing) {
+        final editingYarn = _editingYarn;
+        if (editingYarn == null) {
+          setState(() {
+            _errorMessage = 'Unable to load yarn details. Try again.';
+            _isSaving = false;
+          });
+          return;
+        }
+
+        await _yarnRepository.updateYarn(
+          Yarn(
+            id: editingYarn.id,
+            ownerUid: editingYarn.ownerUid,
+            collectionId: editingYarn.collectionId,
+            brandName: brand,
+            name: yarnName,
+            colorway: _trimmedOrNull(_colorwayController.text),
+            colorFamily: _colorFamily,
+            dyeLot: _trimmedOrNull(_dyeLotController.text),
+            weightCategory: _trimmedOrNull(_weightController.text),
+            wpi: _parseFirstInt(_wpiController.text),
+            fiberContent: fiberContent,
+            fiberContents: fiberContents,
+            yardage: _parseFirstInt(_lengthController.text),
+            unitWeightGrams: _parseFirstInt(_unitWeightController.text),
+            needleSize: _trimmedOrNull(_needleController.text),
+            gauge: _trimmedOrNull(_gaugeController.text),
+            skeinCount: _parseFirstInt(_ballsController.text) ?? 1,
+            priceCents: _parsePriceCents(_priceController.text),
+            status: editingYarn.status,
+            imageUrls: editingYarn.imageUrls,
+            folderName: folderName,
+            folderIds: folderIds,
+            notes: _trimmedOrNull(_notesController.text),
+            createdAt: editingYarn.createdAt,
+            updatedAt: editingYarn.updatedAt,
+          ),
+        );
+        await _folderRepository.syncYarnMembership(
+          uid: editingYarn.ownerUid,
+          collectionId: editingYarn.collectionId,
+          yarnId: editingYarn.id,
+          previousFolderIds: editingYarn.folderIds,
+          nextFolderIds: folderIds,
+        );
+      } else {
+        final createdYarn = await _yarnRepository.createYarn(
+          uid: widget.userId,
+          yarn: Yarn(
+            id: '',
+            ownerUid: widget.userId,
+            collectionId: '',
+            brandName: brand,
+            name: yarnName,
+            colorway: _trimmedOrNull(_colorwayController.text),
+            colorFamily: _colorFamily,
+            dyeLot: _trimmedOrNull(_dyeLotController.text),
+            weightCategory: _trimmedOrNull(_weightController.text),
+            wpi: _parseFirstInt(_wpiController.text),
+            fiberContent: fiberContent,
+            fiberContents: fiberContents,
+            yardage: _parseFirstInt(_lengthController.text),
+            unitWeightGrams: _parseFirstInt(_unitWeightController.text),
+            needleSize: _trimmedOrNull(_needleController.text),
+            gauge: _trimmedOrNull(_gaugeController.text),
+            skeinCount: _parseFirstInt(_ballsController.text) ?? 1,
+            priceCents: _parsePriceCents(_priceController.text),
+            folderName: folderName,
+            folderIds: folderIds,
+            notes: _trimmedOrNull(_notesController.text),
+            createdAt: now,
+            updatedAt: now,
+          ),
+        );
+        await _folderRepository.syncYarnMembership(
+          uid: createdYarn.ownerUid,
+          collectionId: createdYarn.collectionId,
+          yarnId: createdYarn.id,
+          previousFolderIds: const [],
+          nextFolderIds: folderIds,
+        );
+      }
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Yarn added to your stash.')),
+        SnackBar(
+          content: Text(
+            widget.isEditing
+                ? 'Yarn changes saved.'
+                : 'Yarn added to your stash.',
+          ),
+        ),
       );
       widget.onPrimary();
     } catch (_) {
       if (!mounted) return;
       setState(() {
-        _errorMessage = 'Unable to save yarn. Try again.';
+        _errorMessage = widget.isEditing
+            ? 'Unable to save changes. Try again.'
+            : 'Unable to save yarn. Try again.';
       });
     } finally {
       if (mounted) {
         setState(() => _isSaving = false);
       }
     }
+  }
+
+  Widget _editLoadState({required Widget child}) {
+    return ListView(
+      padding: const EdgeInsets.only(bottom: 28),
+      children: [
+        NavRow(
+          leading: CircleIconButton(
+            icon: FontAwesomeIcons.xmark,
+            onTap: widget.onBack,
+          ),
+        ),
+        const SizedBox(height: 96),
+        child,
+      ],
+    );
+  }
+
+  Widget _editMessageState({required String title, required String message}) {
+    return _editLoadState(
+      child: Column(
+        children: [
+          Text(
+            title,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.w900,
+              letterSpacing: tightLetterSpacing,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            message,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: AppColors.muted,
+              fontSize: 15,
+              fontWeight: FontWeight.w700,
+              letterSpacing: tightLetterSpacing,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEditForm() {
+    final collectionId = widget.collectionId;
+    final yarnId = widget.yarnId;
+    if (collectionId == null || yarnId == null) {
+      return _editMessageState(
+        title: 'No yarn selected',
+        message: 'Choose a yarn from your stash before editing it.',
+      );
+    }
+
+    return StreamBuilder<Yarn?>(
+      stream: _yarnRepository.watchYarn(
+        uid: widget.userId,
+        collectionId: collectionId,
+        yarnId: yarnId,
+      ),
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return _editMessageState(
+            title: 'Unable to load yarn',
+            message: 'Try returning to your stash and opening it again.',
+          );
+        }
+
+        if (snapshot.connectionState == ConnectionState.waiting &&
+            !snapshot.hasData) {
+          return _editLoadState(
+            child: const Center(
+              child: CircularProgressIndicator(color: AppColors.accent),
+            ),
+          );
+        }
+
+        final yarn = snapshot.data;
+        if (yarn == null) {
+          return _editMessageState(
+            title: 'Yarn not found',
+            message: 'This yarn may have been removed from your stash.',
+          );
+        }
+
+        _populateFormFromYarn(yarn);
+        return _buildFolderAwareForm();
+      },
+    );
+  }
+
+  Widget _buildFolderAwareForm() {
+    final collectionId =
+        widget.collectionId ?? FirestoreDocumentIds.defaultStashCollection;
+
+    return StreamBuilder<List<StashFolder>>(
+      stream: _folderRepository.watchFolders(
+        uid: widget.userId,
+        collectionId: collectionId,
+      ),
+      builder: (context, snapshot) {
+        final folders = snapshot.data ?? const <StashFolder>[];
+        return _buildForm(folders: folders);
+      },
+    );
+  }
+
+  Widget _buildForm({required List<StashFolder> folders}) {
+    _syncSelectedFolderName(folders);
+
+    return ListView(
+      padding: const EdgeInsets.only(bottom: 28),
+      children: [
+        NavRow(
+          leading: CircleIconButton(
+            icon: widget.isEditing
+                ? FontAwesomeIcons.xmark
+                : FontAwesomeIcons.chevronLeft,
+            onTap: _isSaving ? null : widget.onBack,
+          ),
+        ),
+        const SizedBox(height: 16),
+        NavTitle(widget.isEditing ? 'Edit stash item' : 'Add yarn'),
+        const SizedBox(height: 20),
+        CardSurface(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              YarnPhoto(
+                url: _selectedImageUrl,
+                width: widget.isEditing ? 80 : 96,
+                height: widget.isEditing ? 80 : 96,
+                radius: widget.isEditing ? 22 : 24,
+                fallbackColor: widget.startBlank
+                    ? AppColors.cream
+                    : const Color(0xFFB8D6E8),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const FieldLabel('Yarn name'),
+                    InlineTextField(controller: _yarnNameController),
+                    const SizedBox(height: 10),
+                    const FieldLabel('Brand'),
+                    InlineTextField(controller: _brandController, muted: true),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 24),
+        const SectionTitle('Yarn details'),
+        const SizedBox(height: 12),
+        _fiberContentField(),
+        const SizedBox(height: 12),
+        _editableAutofillGrid(),
+        const SizedBox(height: 24),
+        const SectionTitle('Your stash info'),
+        const SizedBox(height: 12),
+        InfoField(
+          label: 'Colorway',
+          child: InlineTextField(controller: _colorwayController, muted: true),
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: InfoField(
+                label: 'Color family',
+                child: SelectField(
+                  value: _colorFamily,
+                  hintText: '',
+                  items: _colorFamilyItems,
+                  onChanged: (value) => setState(() => _colorFamily = value),
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: InfoField(
+                label: 'Dye lot',
+                child: InlineTextField(
+                  controller: _dyeLotController,
+                  muted: true,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: InfoField(
+                label: 'Balls',
+                child: InlineTextField(
+                  controller: _ballsController,
+                  keyboardType: TextInputType.number,
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: InfoField(
+                label: 'Price',
+                child: InlineTextField(
+                  controller: _priceController,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  muted: true,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        InfoField(
+          label: 'Folder',
+          child: SelectField(
+            value: _folder,
+            items: _folderOptions(folders),
+            onChanged: (value) => _selectFolder(value, folders),
+          ),
+        ),
+        const SizedBox(height: 12),
+        InfoField(
+          label: 'Notes',
+          minHeight: 92,
+          child: InlineTextField(
+            controller: _notesController,
+            keyboardType: TextInputType.multiline,
+            maxLines: 3,
+            muted: true,
+          ),
+        ),
+        const SizedBox(height: 12),
+        const InfoField(
+          label: 'Images',
+          child: Column(children: [SizedBox(height: 8), UploadBox()]),
+        ),
+        if (_errorMessage != null) ...[
+          const SizedBox(height: 12),
+          _AuthMessage(message: _errorMessage!, isError: true),
+        ],
+        const SizedBox(height: 20),
+        PrimaryButton(
+          label: _isSaving
+              ? 'Saving...'
+              : widget.isEditing
+              ? 'Save changes'
+              : 'Add to collection',
+          icon: widget.isEditing
+              ? FontAwesomeIcons.check
+              : FontAwesomeIcons.plus,
+          onTap: _isSaving ? null : () => _saveYarn(folders),
+        ),
+        if (widget.isEditing) ...[
+          const SizedBox(height: 12),
+          const SecondaryButton(
+            label: 'Move to used up',
+            icon: FontAwesomeIcons.boxArchive,
+          ),
+          const SizedBox(height: 12),
+          const SecondaryButton(
+            label: 'Remove from stash',
+            icon: FontAwesomeIcons.trashCan,
+            foregroundColor: AppColors.danger,
+          ),
+        ],
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.isEditing) return _buildEditForm();
+
+    return _buildFolderAwareForm();
   }
 
   @override
@@ -2262,185 +2872,6 @@ class _YarnFormScreenState extends State<YarnFormScreen> {
           ),
         ],
       ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return ListView(
-      padding: const EdgeInsets.only(bottom: 28),
-      children: [
-        NavRow(
-          leading: CircleIconButton(
-            icon: widget.isEditing
-                ? FontAwesomeIcons.xmark
-                : FontAwesomeIcons.chevronLeft,
-            onTap: _isSaving ? null : widget.onBack,
-          ),
-        ),
-        const SizedBox(height: 16),
-        NavTitle(widget.isEditing ? 'Edit stash item' : 'Add yarn'),
-        const SizedBox(height: 20),
-        CardSurface(
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            children: [
-              YarnPhoto(
-                url: widget.startBlank
-                    ? ''
-                    : widget.isEditing
-                    ? _imgEdit
-                    : _imgMerino,
-                width: widget.isEditing ? 80 : 96,
-                height: widget.isEditing ? 80 : 96,
-                radius: widget.isEditing ? 22 : 24,
-                fallbackColor: widget.startBlank
-                    ? AppColors.cream
-                    : const Color(0xFFB8D6E8),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const FieldLabel('Yarn name'),
-                    InlineTextField(controller: _yarnNameController),
-                    const SizedBox(height: 10),
-                    const FieldLabel('Brand'),
-                    InlineTextField(controller: _brandController, muted: true),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 24),
-        const SectionTitle('Yarn details'),
-        const SizedBox(height: 12),
-        _fiberContentField(),
-        const SizedBox(height: 12),
-        _editableAutofillGrid(),
-        const SizedBox(height: 24),
-        const SectionTitle('Your stash info'),
-        const SizedBox(height: 12),
-        InfoField(
-          label: 'Colorway',
-          child: InlineTextField(controller: _colorwayController, muted: true),
-        ),
-        const SizedBox(height: 12),
-        Row(
-          children: [
-            Expanded(
-              child: InfoField(
-                label: 'Color family',
-                child: SelectField(
-                  value: _colorFamily,
-                  hintText: '',
-                  items: _colorFamilyOptions,
-                  onChanged: (value) => setState(() => _colorFamily = value),
-                ),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: InfoField(
-                label: 'Dye lot',
-                child: InlineTextField(
-                  controller: _dyeLotController,
-                  muted: true,
-                ),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        Row(
-          children: [
-            Expanded(
-              child: InfoField(
-                label: 'Balls',
-                child: InlineTextField(
-                  controller: _ballsController,
-                  keyboardType: TextInputType.number,
-                ),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: InfoField(
-                label: 'Price',
-                child: InlineTextField(
-                  controller: _priceController,
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
-                  ),
-                  muted: true,
-                ),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        InfoField(
-          label: 'Folder',
-          child: SelectField(
-            value: _folder,
-            items: const [
-              'Sweaters',
-              'Socks',
-              'Summer tops',
-              'Bin 2',
-              'No folder',
-            ],
-            onChanged: (value) => setState(() => _folder = value ?? _folder),
-          ),
-        ),
-        const SizedBox(height: 12),
-        InfoField(
-          label: 'Notes',
-          minHeight: 92,
-          child: InlineTextField(
-            controller: _notesController,
-            keyboardType: TextInputType.multiline,
-            maxLines: 3,
-            muted: true,
-          ),
-        ),
-        const SizedBox(height: 12),
-        const InfoField(
-          label: 'Images',
-          child: Column(children: [SizedBox(height: 8), UploadBox()]),
-        ),
-        if (_errorMessage != null) ...[
-          const SizedBox(height: 12),
-          _AuthMessage(message: _errorMessage!, isError: true),
-        ],
-        const SizedBox(height: 20),
-        PrimaryButton(
-          label: _isSaving
-              ? 'Saving...'
-              : widget.isEditing
-              ? 'Save changes'
-              : 'Add to collection',
-          icon: widget.isEditing
-              ? FontAwesomeIcons.check
-              : FontAwesomeIcons.plus,
-          onTap: _isSaving ? null : _saveYarn,
-        ),
-        if (widget.isEditing) ...[
-          const SizedBox(height: 12),
-          const SecondaryButton(
-            label: 'Move to used up',
-            icon: FontAwesomeIcons.boxArchive,
-          ),
-          const SizedBox(height: 12),
-          const SecondaryButton(
-            label: 'Remove from stash',
-            icon: FontAwesomeIcons.trashCan,
-            foregroundColor: AppColors.danger,
-          ),
-        ],
-      ],
     );
   }
 }
@@ -2558,12 +2989,23 @@ class _FiberInputBox extends StatelessWidget {
 }
 
 class FoldersScreen extends StatelessWidget {
-  const FoldersScreen({super.key, required this.onFolderTap});
+  const FoldersScreen({
+    super.key,
+    required this.userId,
+    required this.collectionId,
+    required this.onFolderTap,
+    this.folderRepository,
+    this.yarnRepository,
+  });
 
-  final VoidCallback onFolderTap;
+  final String userId;
+  final String collectionId;
+  final ValueChanged<StashFolder> onFolderTap;
+  final StashFolderRepository? folderRepository;
+  final YarnRepository? yarnRepository;
 
   Future<void> _openCreateFolder(BuildContext context) async {
-    await showDialog<_FolderEditResult>(
+    final result = await showDialog<_FolderEditResult>(
       context: context,
       barrierColor: AppColors.ink.withValues(alpha: 0.35),
       builder: (context) => const FolderEditDialog(
@@ -2572,10 +3014,34 @@ class FoldersScreen extends StatelessWidget {
         showDelete: false,
       ),
     );
+    if (result == null || result.name.isEmpty) return;
+
+    final repository = folderRepository ?? StashFolderRepository();
+    try {
+      await repository.createFolder(
+        uid: userId,
+        collectionId: collectionId,
+        name: result.name,
+        iconKey: result.iconKey,
+        colorValue: result.colorValue,
+      );
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Folder created.')));
+    } catch (_) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Unable to create folder. Try again.')),
+      );
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    final foldersRepository = folderRepository ?? StashFolderRepository();
+    final yarnsRepository = yarnRepository ?? YarnRepository();
+
     return ListView(
       padding: const EdgeInsets.only(bottom: 18),
       children: [
@@ -2599,55 +3065,72 @@ class FoldersScreen extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 20),
-        GridView.count(
-          crossAxisCount: 2,
-          crossAxisSpacing: 12,
-          mainAxisSpacing: 12,
-          mainAxisExtent: 156,
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          children: [
-            _FolderCard(
-              title: 'Sweaters',
-              subtitle: '24 yarns - 9.2k yd',
-              icon: FontAwesomeIcons.shirt,
-              background: AppColors.rose,
-              foreground: AppColors.accentDark,
-              onTap: onFolderTap,
-            ),
-            _FolderCard(
-              title: 'Socks',
-              subtitle: '18 yarns - 7.6k yd',
-              icon: FontAwesomeIcons.socks,
-              background: AppColors.sageSoft,
-              foreground: const Color(0xFF587456),
-              onTap: onFolderTap,
-            ),
-            _FolderCard(
-              title: 'Summer tops',
-              subtitle: '12 yarns - 4.1k yd',
-              icon: FontAwesomeIcons.sun,
-              background: AppColors.goldSoft,
-              foreground: const Color(0xFFA87523),
-              onTap: onFolderTap,
-            ),
-            _FolderCard(
-              title: 'Bin 2',
-              subtitle: '31 yarns - storage',
-              icon: FontAwesomeIcons.boxArchive,
-              background: AppColors.lavenderSoft,
-              foreground: const Color(0xFF6D579A),
-              onTap: onFolderTap,
-            ),
-            _FolderCard(
-              title: 'Used up',
-              subtitle: '7 yarns - finished',
-              icon: FontAwesomeIcons.circleCheck,
-              background: AppColors.taupeSoft,
-              foreground: const Color(0xFF7A5F4E),
-              onTap: onFolderTap,
-            ),
-          ],
+        StreamBuilder<List<StashFolder>>(
+          stream: foldersRepository.watchFolders(
+            uid: userId,
+            collectionId: collectionId,
+          ),
+          builder: (context, folderSnapshot) {
+            if (folderSnapshot.hasError) {
+              return const _FolderLoadState(
+                title: 'Unable to load folders',
+                message: 'Try again in a moment.',
+              );
+            }
+
+            if (folderSnapshot.connectionState == ConnectionState.waiting &&
+                !folderSnapshot.hasData) {
+              return const Center(
+                child: Padding(
+                  padding: EdgeInsets.symmetric(vertical: 42),
+                  child: CircularProgressIndicator(color: AppColors.accent),
+                ),
+              );
+            }
+
+            final folders = folderSnapshot.data ?? const <StashFolder>[];
+            if (folders.isEmpty) {
+              return const _FolderLoadState(
+                title: 'No folders yet',
+                message: 'Create a folder to organize your stash.',
+              );
+            }
+
+            return StreamBuilder<List<Yarn>>(
+              stream: yarnsRepository.watchYarns(
+                uid: userId,
+                collectionId: collectionId,
+              ),
+              builder: (context, yarnSnapshot) {
+                final yarns = yarnSnapshot.data ?? const <Yarn>[];
+
+                return GridView.count(
+                  crossAxisCount: 2,
+                  crossAxisSpacing: 12,
+                  mainAxisSpacing: 12,
+                  mainAxisExtent: 156,
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  children: [
+                    for (final folder in folders)
+                      _FolderCard(
+                        title: folder.name,
+                        subtitle: _folderSubtitle(
+                          folder,
+                          _yarnsForFolder(folder, yarns),
+                        ),
+                        icon: _folderIconForKey(folder.iconKey),
+                        background: _folderBackgroundColor(folder),
+                        foreground: _folderForegroundColor(
+                          _folderBackgroundColor(folder),
+                        ),
+                        onTap: () => onFolderTap(folder),
+                      ),
+                  ],
+                );
+              },
+            );
+          },
         ),
       ],
     );
@@ -2657,34 +3140,178 @@ class FoldersScreen extends StatelessWidget {
 class FolderDetailScreen extends StatelessWidget {
   const FolderDetailScreen({
     super.key,
-    required this.folderName,
+    required this.userId,
+    required this.collectionId,
+    required this.folderId,
     required this.onBack,
-    required this.onFolderNameChanged,
     required this.onYarnTap,
+    this.folderRepository,
+    this.yarnRepository,
   });
 
-  final String folderName;
+  final String userId;
+  final String collectionId;
+  final String? folderId;
   final VoidCallback onBack;
-  final ValueChanged<String> onFolderNameChanged;
-  final VoidCallback onYarnTap;
+  final ValueChanged<Yarn> onYarnTap;
+  final StashFolderRepository? folderRepository;
+  final YarnRepository? yarnRepository;
 
-  Future<void> _openFolderEditor(BuildContext context) async {
+  Future<void> _openFolderEditor(
+    BuildContext context,
+    StashFolder folder,
+  ) async {
+    final repository = folderRepository ?? StashFolderRepository();
     final result = await showDialog<_FolderEditResult>(
       context: context,
       barrierColor: AppColors.ink.withValues(alpha: 0.35),
-      builder: (context) => FolderEditDialog(initialName: folderName),
+      builder: (context) => FolderEditDialog(
+        initialName: folder.name,
+        initialIconKey: folder.iconKey,
+        initialColorValue: folder.colorValue,
+        showDelete: !folder.isSystem,
+      ),
     );
     if (result == null) return;
 
-    switch (result.action) {
-      case _FolderEditAction.save:
-        if (result.name.isNotEmpty) {
-          onFolderNameChanged(result.name);
-        }
-      case _FolderEditAction.delete:
-        onBack();
+    try {
+      switch (result.action) {
+        case _FolderEditAction.save:
+          if (result.name.isNotEmpty) {
+            await repository.updateFolder(
+              folder.copyWith(
+                name: result.name,
+                iconKey: result.iconKey,
+                colorValue: result.colorValue,
+              ),
+            );
+          }
+        case _FolderEditAction.delete:
+          await repository.deleteFolder(
+            uid: userId,
+            collectionId: collectionId,
+            folderId: folder.id,
+          );
+          if (context.mounted) onBack();
+      }
+    } catch (_) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Unable to update folder. Try again.')),
+      );
     }
   }
+
+  @override
+  Widget build(BuildContext context) {
+    final selectedFolderId = folderId;
+    if (selectedFolderId == null) {
+      return _FolderDetailMessageState(
+        onBack: onBack,
+        title: 'No folder selected',
+        message: 'Choose a folder to view its yarns.',
+      );
+    }
+
+    final foldersRepository = folderRepository ?? StashFolderRepository();
+    final yarnsRepository = yarnRepository ?? YarnRepository();
+
+    return StreamBuilder<StashFolder?>(
+      stream: foldersRepository.watchFolder(
+        uid: userId,
+        collectionId: collectionId,
+        folderId: selectedFolderId,
+      ),
+      builder: (context, folderSnapshot) {
+        if (folderSnapshot.hasError) {
+          return _FolderDetailMessageState(
+            onBack: onBack,
+            title: 'Unable to load folder',
+            message: 'Try returning to your folders and opening it again.',
+          );
+        }
+
+        if (folderSnapshot.connectionState == ConnectionState.waiting &&
+            !folderSnapshot.hasData) {
+          return _FolderDetailLoadingState(onBack: onBack);
+        }
+
+        final folder = folderSnapshot.data;
+        if (folder == null) {
+          return _FolderDetailMessageState(
+            onBack: onBack,
+            title: 'Folder not found',
+            message: 'This folder may have been deleted.',
+          );
+        }
+
+        return StreamBuilder<List<Yarn>>(
+          stream: yarnsRepository.watchYarns(
+            uid: userId,
+            collectionId: collectionId,
+          ),
+          builder: (context, yarnSnapshot) {
+            final yarns = _yarnsForFolder(
+              folder,
+              yarnSnapshot.data ?? const <Yarn>[],
+            );
+
+            return _FolderDetailContent(
+              folder: folder,
+              yarns: yarns,
+              onBack: onBack,
+              onEdit: () => _openFolderEditor(context, folder),
+              onYarnTap: onYarnTap,
+            );
+          },
+        );
+      },
+    );
+  }
+}
+
+class _FolderLoadState extends StatelessWidget {
+  const _FolderLoadState({required this.title, required this.message});
+
+  final String title;
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 46),
+      child: Column(
+        children: [
+          Text(
+            title,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.w900,
+              letterSpacing: tightLetterSpacing,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            message,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: AppColors.muted,
+              fontSize: 15,
+              fontWeight: FontWeight.w700,
+              letterSpacing: tightLetterSpacing,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _FolderDetailLoadingState extends StatelessWidget {
+  const _FolderDetailLoadingState({required this.onBack});
+
+  final VoidCallback onBack;
 
   @override
   Widget build(BuildContext context) {
@@ -2696,10 +3323,92 @@ class FolderDetailScreen extends StatelessWidget {
             icon: FontAwesomeIcons.chevronLeft,
             onTap: onBack,
           ),
+        ),
+        const SizedBox(height: 96),
+        const Center(child: CircularProgressIndicator(color: AppColors.accent)),
+      ],
+    );
+  }
+}
+
+class _FolderDetailMessageState extends StatelessWidget {
+  const _FolderDetailMessageState({
+    required this.onBack,
+    required this.title,
+    required this.message,
+  });
+
+  final VoidCallback onBack;
+  final String title;
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.only(bottom: 28),
+      children: [
+        NavRow(
+          leading: CircleIconButton(
+            icon: FontAwesomeIcons.chevronLeft,
+            onTap: onBack,
+          ),
+        ),
+        const SizedBox(height: 96),
+        Text(
+          title,
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            fontSize: 22,
+            fontWeight: FontWeight.w900,
+            letterSpacing: tightLetterSpacing,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          message,
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            color: AppColors.muted,
+            fontSize: 15,
+            fontWeight: FontWeight.w700,
+            letterSpacing: tightLetterSpacing,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _FolderDetailContent extends StatelessWidget {
+  const _FolderDetailContent({
+    required this.folder,
+    required this.yarns,
+    required this.onBack,
+    required this.onEdit,
+    required this.onYarnTap,
+  });
+
+  final StashFolder folder;
+  final List<Yarn> yarns;
+  final VoidCallback onBack;
+  final VoidCallback onEdit;
+  final ValueChanged<Yarn> onYarnTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final background = _folderBackgroundColor(folder);
+    return ListView(
+      padding: const EdgeInsets.only(bottom: 28),
+      children: [
+        NavRow(
+          leading: CircleIconButton(
+            icon: FontAwesomeIcons.chevronLeft,
+            onTap: onBack,
+          ),
           trailing: CircleIconButton(
             icon: FontAwesomeIcons.pen,
             label: 'Edit folder',
-            onTap: () => _openFolderEditor(context),
+            onTap: onEdit,
           ),
         ),
         const SizedBox(height: 20),
@@ -2714,19 +3423,19 @@ class FolderDetailScreen extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const IconBadge(
-                icon: FontAwesomeIcons.shirt,
-                background: AppColors.rose,
-                foreground: AppColors.accentDark,
+              IconBadge(
+                icon: _folderIconForKey(folder.iconKey),
+                background: background,
+                foreground: _folderForegroundColor(background),
                 size: 56,
                 iconSize: 20,
               ),
               const SizedBox(height: 18),
-              NavTitle(folderName),
+              NavTitle(folder.name),
               const SizedBox(height: 8),
-              const Text(
-                '24 yarns - 9,240 yards available',
-                style: TextStyle(
+              Text(
+                _folderSubtitle(folder, yarns),
+                style: const TextStyle(
                   color: AppColors.muted,
                   fontSize: 15,
                   fontWeight: FontWeight.w700,
@@ -2737,37 +3446,29 @@ class FolderDetailScreen extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 20),
-        SearchBox(text: 'Search in $folderName'),
+        SearchBox(text: 'Search in ${folder.name}'),
         const SizedBox(height: 16),
-        _YarnListCard(
-          imageUrl: _imgFolderGreen,
-          title: 'Cascade 220',
-          subtitle: 'Sage - 7 balls',
-          detail: '1,540 yd total',
-          showChevron: true,
-          fallbackColor: AppColors.sageSoft,
-          onTap: onYarnTap,
-        ),
-        const SizedBox(height: 12),
-        _YarnListCard(
-          imageUrl: _imgFolderBrown,
-          title: 'Brooklyn Tweed Shelter',
-          subtitle: 'Truffle - 5 skeins',
-          detail: '700 yd total',
-          showChevron: true,
-          fallbackColor: AppColors.taupeSoft,
-          onTap: onYarnTap,
-        ),
-        const SizedBox(height: 12),
-        _YarnListCard(
-          imageUrl: _imgFolderCream,
-          title: 'Woolfolk Far',
-          subtitle: 'Oat - 8 balls',
-          detail: '1,136 yd total',
-          showChevron: true,
-          fallbackColor: AppColors.cream,
-          onTap: onYarnTap,
-        ),
+        if (yarns.isEmpty)
+          const _FolderLoadState(
+            title: 'No yarns here yet',
+            message:
+                'Assign yarn to this folder from the add or edit yarn page.',
+          )
+        else
+          for (var index = 0; index < yarns.length; index++) ...[
+            _YarnListCard(
+              imageUrl: yarns[index].imageUrls.isEmpty
+                  ? ''
+                  : yarns[index].imageUrls.first,
+              title: _yarnTitle(yarns[index]),
+              subtitle: _folderYarnSubtitle(yarns[index]),
+              detail: _folderYarnDetail(yarns[index]),
+              showChevron: true,
+              fallbackColor: _fallbackColorForYarn(yarns[index]),
+              onTap: () => onYarnTap(yarns[index]),
+            ),
+            if (index != yarns.length - 1) const SizedBox(height: 12),
+          ],
       ],
     );
   }
@@ -2776,15 +3477,26 @@ class FolderDetailScreen extends StatelessWidget {
 class ProfileScreen extends StatelessWidget {
   const ProfileScreen({
     super.key,
+    required this.userId,
+    required this.collectionId,
     required this.displayName,
     required this.onSettings,
+    this.yarnRepository,
+    this.folderRepository,
   });
 
+  final String userId;
+  final String collectionId;
   final String displayName;
   final VoidCallback onSettings;
+  final YarnRepository? yarnRepository;
+  final StashFolderRepository? folderRepository;
 
   @override
   Widget build(BuildContext context) {
+    final yarnsRepository = yarnRepository ?? YarnRepository();
+    final foldersRepository = folderRepository ?? StashFolderRepository();
+
     return ListView(
       padding: const EdgeInsets.only(bottom: 18),
       children: [
@@ -2817,43 +3529,257 @@ class ProfileScreen extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 12),
-              Text(
-                displayName,
-                style: const TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: tightLetterSpacing,
+              Expanded(
+                child: Text(
+                  displayName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: tightLetterSpacing,
+                  ),
                 ),
               ),
             ],
           ),
         ),
         const SizedBox(height: 20),
+        StreamBuilder<List<Yarn>>(
+          stream: yarnsRepository.watchYarns(
+            uid: userId,
+            collectionId: collectionId,
+          ),
+          builder: (context, yarnSnapshot) {
+            if (yarnSnapshot.hasError) {
+              return const _ProfileLoadState(
+                title: 'Unable to load stash data',
+                message: 'Try opening your profile again in a moment.',
+              );
+            }
+
+            if (yarnSnapshot.connectionState == ConnectionState.waiting &&
+                !yarnSnapshot.hasData) {
+              return const Center(
+                child: Padding(
+                  padding: EdgeInsets.symmetric(vertical: 42),
+                  child: CircularProgressIndicator(color: AppColors.accent),
+                ),
+              );
+            }
+
+            return StreamBuilder<List<StashFolder>>(
+              stream: foldersRepository.watchFolders(
+                uid: userId,
+                collectionId: collectionId,
+              ),
+              builder: (context, folderSnapshot) {
+                final stats = _ProfileStats.fromStash(
+                  yarnSnapshot.data ?? const <Yarn>[],
+                  folderSnapshot.data ?? const <StashFolder>[],
+                );
+                return _ProfileStatsContent(stats: stats);
+              },
+            );
+          },
+        ),
+      ],
+    );
+  }
+}
+
+class _ProfileStats {
+  const _ProfileStats({
+    required this.yarnCount,
+    required this.skeinCount,
+    required this.totalGrams,
+    required this.totalYardage,
+    required this.folderCount,
+    required this.usedUpCount,
+    required this.fiberRows,
+    required this.weightRows,
+    required this.statusRows,
+  });
+
+  final int yarnCount;
+  final int skeinCount;
+  final int totalGrams;
+  final int totalYardage;
+  final int folderCount;
+  final int usedUpCount;
+  final List<ProgressRow> fiberRows;
+  final List<ProgressRow> weightRows;
+  final List<ProgressRow> statusRows;
+
+  bool get hasYarn => yarnCount > 0;
+
+  factory _ProfileStats.fromStash(List<Yarn> yarns, List<StashFolder> folders) {
+    final totalSkeins = yarns.fold<int>(
+      0,
+      (total, yarn) => total + yarn.skeinCount,
+    );
+    final totalGrams = yarns.fold<int>(0, (total, yarn) {
+      final grams = yarn.unitWeightGrams;
+      return total + (grams == null ? 0 : grams * yarn.skeinCount);
+    });
+    final totalYardage = _totalYardageForYarns(yarns);
+
+    return _ProfileStats(
+      yarnCount: yarns.length,
+      skeinCount: totalSkeins,
+      totalGrams: totalGrams,
+      totalYardage: totalYardage,
+      folderCount: folders.length,
+      usedUpCount: yarns
+          .where((yarn) => yarn.status == YarnStatus.usedUp)
+          .length,
+      fiberRows: _topProgressRows(_fiberBreakdown(yarns), maxRows: 4),
+      weightRows: _topProgressRows(_weightBreakdown(yarns), maxRows: 4),
+      statusRows: _topProgressRows(_statusBreakdown(yarns), maxRows: 4),
+    );
+  }
+}
+
+String _compactNumber(int value) {
+  if (value < 1000) return value.toString();
+
+  final compact = value / 1000;
+  if (compact >= 10 || compact == compact.roundToDouble()) {
+    return '${compact.round()}k';
+  }
+
+  return '${compact.toStringAsFixed(1)}k';
+}
+
+Map<String, double> _fiberBreakdown(List<Yarn> yarns) {
+  final breakdown = <String, double>{};
+
+  for (final yarn in yarns) {
+    final multiplier = yarn.skeinCount <= 0 ? 1 : yarn.skeinCount;
+    if (yarn.fiberContents.isNotEmpty) {
+      for (final fiberContent in yarn.fiberContents) {
+        final label = _cleanText(fiberContent.fiber) ?? 'Not set';
+        breakdown[label] =
+            (breakdown[label] ?? 0) + fiberContent.percentage * multiplier;
+      }
+      continue;
+    }
+
+    final legacy = _cleanText(yarn.fiberContent);
+    if (legacy == null) {
+      breakdown['Not set'] = (breakdown['Not set'] ?? 0) + 100 * multiplier;
+      continue;
+    }
+
+    var parsedAny = false;
+    for (final part in legacy.split(',')) {
+      final match = RegExp(r'^\s*(\d+)\s*%\s*(.+?)\s*$').firstMatch(part);
+      if (match == null) continue;
+
+      parsedAny = true;
+      final label = _cleanText(match.group(2)) ?? 'Not set';
+      final percent = int.tryParse(match.group(1)!) ?? 0;
+      breakdown[label] = (breakdown[label] ?? 0) + percent * multiplier;
+    }
+
+    if (!parsedAny) {
+      breakdown[legacy] = (breakdown[legacy] ?? 0) + 100 * multiplier;
+    }
+  }
+
+  return breakdown;
+}
+
+Map<String, double> _weightBreakdown(List<Yarn> yarns) {
+  final breakdown = <String, double>{};
+
+  for (final yarn in yarns) {
+    final label = _cleanText(yarn.weightCategory) ?? 'Not set';
+    final amount = yarn.skeinCount <= 0 ? 1 : yarn.skeinCount;
+    breakdown[label] = (breakdown[label] ?? 0) + amount;
+  }
+
+  return breakdown;
+}
+
+Map<String, double> _statusBreakdown(List<Yarn> yarns) {
+  final breakdown = <String, double>{};
+
+  for (final yarn in yarns) {
+    final label = _statusLabel(yarn.status);
+    breakdown[label] = (breakdown[label] ?? 0) + 1;
+  }
+
+  return breakdown;
+}
+
+List<ProgressRow> _topProgressRows(
+  Map<String, double> values, {
+  required int maxRows,
+}) {
+  if (values.isEmpty) {
+    return const [ProgressRow(label: 'Not set', percent: 100)];
+  }
+
+  final entries = values.entries.toList()
+    ..sort((a, b) => b.value.compareTo(a.value));
+  final total = entries.fold<double>(0, (sum, entry) => sum + entry.value);
+  if (total <= 0) {
+    return const [ProgressRow(label: 'Not set', percent: 100)];
+  }
+
+  final visible = entries.take(maxRows).toList();
+  final hidden = entries
+      .skip(maxRows)
+      .fold<double>(0, (sum, entry) => sum + entry.value);
+  if (hidden > 0) {
+    visible.add(MapEntry('Other', hidden));
+  }
+
+  return [
+    for (final entry in visible)
+      ProgressRow(
+        label: entry.key,
+        percent: ((entry.value / total) * 100).round().clamp(1, 100),
+      ),
+  ];
+}
+
+class _ProfileStatsContent extends StatelessWidget {
+  const _ProfileStatsContent({required this.stats});
+
+  final _ProfileStats stats;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
         const SectionTitle('Stash statistics'),
         const SizedBox(height: 12),
-        const Row(
+        Row(
           children: [
             Expanded(
               child: StatCard(
-                value: '128',
+                value: stats.skeinCount.toString(),
                 label: 'Skeins',
                 centered: true,
                 valueSize: 24,
               ),
             ),
-            SizedBox(width: 12),
+            const SizedBox(width: 12),
             Expanded(
               child: StatCard(
-                value: '14.8k',
+                value: _compactNumber(stats.totalGrams),
                 label: 'Grams',
                 centered: true,
                 valueSize: 24,
               ),
             ),
-            SizedBox(width: 12),
+            const SizedBox(width: 12),
             Expanded(
               child: StatCard(
-                value: '38.2k',
+                value: _compactNumber(stats.totalYardage),
                 label: 'Yardage',
                 centered: true,
                 valueSize: 24,
@@ -2861,26 +3787,86 @@ class ProfileScreen extends StatelessWidget {
             ),
           ],
         ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: StatCard(
+                value: stats.yarnCount.toString(),
+                label: 'Yarns',
+                centered: true,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: StatCard(
+                value: stats.folderCount.toString(),
+                label: 'Folders',
+                centered: true,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: StatCard(
+                value: stats.usedUpCount.toString(),
+                label: 'Used up',
+                centered: true,
+              ),
+            ),
+          ],
+        ),
         const SizedBox(height: 20),
-        const _ProgressCard(
-          title: 'Fiber content',
-          rows: [
-            ProgressRow(label: 'Wool', percent: 52),
-            ProgressRow(label: 'Cotton', percent: 24),
-            ProgressRow(label: 'Acrylic', percent: 18),
-          ],
-        ),
-        const SizedBox(height: 16),
-        const _ProgressCard(
-          title: 'Weight',
-          rows: [
-            ProgressRow(label: 'Lace', percent: 9),
-            ProgressRow(label: 'Fingering', percent: 31),
-            ProgressRow(label: 'DK', percent: 28),
-            ProgressRow(label: 'Chunky', percent: 16),
-          ],
-        ),
+        if (!stats.hasYarn)
+          const _ProfileLoadState(
+            title: 'No stash data yet',
+            message: 'Add yarn to see your profile statistics.',
+          )
+        else ...[
+          _ProgressCard(title: 'Fiber content', rows: stats.fiberRows),
+          const SizedBox(height: 16),
+          _ProgressCard(title: 'Weight', rows: stats.weightRows),
+          const SizedBox(height: 16),
+          _ProgressCard(title: 'Status', rows: stats.statusRows),
+        ],
       ],
+    );
+  }
+}
+
+class _ProfileLoadState extends StatelessWidget {
+  const _ProfileLoadState({required this.title, required this.message});
+
+  final String title;
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 34),
+      child: Column(
+        children: [
+          Text(
+            title,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.w900,
+              letterSpacing: tightLetterSpacing,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            message,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: AppColors.muted,
+              fontSize: 15,
+              fontWeight: FontWeight.w700,
+              letterSpacing: tightLetterSpacing,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -2972,11 +3958,15 @@ class FolderEditDialog extends StatefulWidget {
   const FolderEditDialog({
     super.key,
     required this.initialName,
+    this.initialIconKey = 'folder',
+    this.initialColorValue = 0xFFF6D9CD,
     this.title = 'Edit folder',
     this.showDelete = true,
   });
 
   final String initialName;
+  final String initialIconKey;
+  final int initialColorValue;
   final String title;
   final bool showDelete;
 
@@ -2987,14 +3977,22 @@ class FolderEditDialog extends StatefulWidget {
 enum _FolderEditAction { save, delete }
 
 class _FolderEditResult {
-  const _FolderEditResult.save(this.name) : action = _FolderEditAction.save;
+  const _FolderEditResult.save(
+    this.name, {
+    required this.iconKey,
+    required this.colorValue,
+  }) : action = _FolderEditAction.save;
 
   const _FolderEditResult.delete()
     : action = _FolderEditAction.delete,
-      name = '';
+      name = '',
+      iconKey = 'folder',
+      colorValue = 0xFFF6D9CD;
 
   final _FolderEditAction action;
   final String name;
+  final String iconKey;
+  final int colorValue;
 }
 
 class _FolderEditDialogState extends State<FolderEditDialog> {
@@ -3003,26 +4001,38 @@ class _FolderEditDialogState extends State<FolderEditDialog> {
   int _selectedColor = 0;
   Color? _customColor;
 
-  final _icons = const [
-    FontAwesomeIcons.shirt,
-    FontAwesomeIcons.socks,
-    FontAwesomeIcons.sun,
-    FontAwesomeIcons.boxArchive,
+  final _iconKeys = const [
+    'folder',
+    'shirt',
+    'socks',
+    'sun',
+    'boxArchive',
+    'circleCheck',
   ];
 
   static const _customColorIndex = 4;
 
-  final _presetColors = const [
-    AppColors.rose,
-    AppColors.sageSoft,
-    AppColors.goldSoft,
-    AppColors.lavenderSoft,
+  final _presetColorValues = const [
+    0xFFF6D9CD,
+    0xFFDCE7D7,
+    0xFFF7E7C6,
+    0xFFE7DDF6,
   ];
 
   @override
   void initState() {
     super.initState();
     _controller = TextEditingController(text: widget.initialName);
+    final iconIndex = _iconKeys.indexOf(widget.initialIconKey);
+    _selectedIcon = iconIndex < 0 ? 0 : iconIndex;
+
+    final colorIndex = _presetColorValues.indexOf(widget.initialColorValue);
+    if (colorIndex < 0) {
+      _customColor = Color(widget.initialColorValue);
+      _selectedColor = _customColorIndex;
+    } else {
+      _selectedColor = colorIndex;
+    }
   }
 
   @override
@@ -3048,7 +4058,16 @@ class _FolderEditDialogState extends State<FolderEditDialog> {
   }
 
   void _saveFolder() {
-    Navigator.pop(context, _FolderEditResult.save(_controller.text.trim()));
+    Navigator.pop(
+      context,
+      _FolderEditResult.save(
+        _controller.text.trim(),
+        iconKey: _iconKeys[_selectedIcon],
+        colorValue: _selectedColor == _customColorIndex
+            ? (_customColor ?? AppColors.accent).toARGB32()
+            : _presetColorValues[_selectedColor],
+      ),
+    );
   }
 
   Future<void> _deleteFolder() async {
@@ -3099,16 +4118,16 @@ class _FolderEditDialogState extends State<FolderEditDialog> {
           const SizedBox(height: 8),
           Row(
             children: [
-              for (var i = 0; i < _icons.length; i++) ...[
+              for (var i = 0; i < _iconKeys.length; i++) ...[
                 Expanded(
                   child: ChoiceButton(
                     label: '',
-                    icon: _icons[i],
+                    icon: _folderIconForKey(_iconKeys[i]),
                     selected: _selectedIcon == i,
                     onTap: () => setState(() => _selectedIcon = i),
                   ),
                 ),
-                if (i < _icons.length - 1) const SizedBox(width: 8),
+                if (i < _iconKeys.length - 1) const SizedBox(width: 8),
               ],
             ],
           ),
@@ -3120,10 +4139,10 @@ class _FolderEditDialogState extends State<FolderEditDialog> {
           const SizedBox(height: 8),
           Row(
             children: [
-              for (var i = 0; i < _presetColors.length; i++) ...[
+              for (var i = 0; i < _presetColorValues.length; i++) ...[
                 Expanded(
                   child: SwatchButton(
-                    color: _presetColors[i],
+                    color: Color(_presetColorValues[i]),
                     selected: _selectedColor == i,
                     onTap: () => setState(() => _selectedColor = i),
                   ),

@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '../firestore_paths.dart';
 import '../models/app_user.dart';
 import '../repositories/stash_collection_repository.dart';
+import '../repositories/stash_folder_repository.dart';
 import '../repositories/user_repository.dart';
 
 class AuthService {
@@ -10,14 +11,18 @@ class AuthService {
     FirebaseAuth? firebaseAuth,
     UserRepository? userRepository,
     StashCollectionRepository? stashCollectionRepository,
+    StashFolderRepository? stashFolderRepository,
   }) : _firebaseAuth = firebaseAuth ?? FirebaseAuth.instance,
        _userRepository = userRepository ?? UserRepository(),
        _stashCollectionRepository =
-           stashCollectionRepository ?? StashCollectionRepository();
+           stashCollectionRepository ?? StashCollectionRepository(),
+       _stashFolderRepository =
+           stashFolderRepository ?? StashFolderRepository();
 
   final FirebaseAuth _firebaseAuth;
   final UserRepository _userRepository;
   final StashCollectionRepository _stashCollectionRepository;
+  final StashFolderRepository _stashFolderRepository;
 
   Stream<User?> get authStateChanges => _firebaseAuth.authStateChanges();
 
@@ -109,6 +114,7 @@ class AuthService {
     );
 
     await _stashCollectionRepository.ensureDefaultCollection(uid);
+    await _stashFolderRepository.ensureDefaultFolders(uid);
   }
 
   String get defaultStashCollectionId {

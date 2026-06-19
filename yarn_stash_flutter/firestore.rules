@@ -25,6 +25,33 @@ service cloud.firestore {
             && request.resource.data.ownerUid == uid
             && request.resource.data.collectionId == collectionId;
         }
+
+        match /folders/{folderId} {
+          allow read: if isOwner(uid);
+          allow create: if isOwner(uid)
+            && request.resource.data.ownerUid == uid
+            && request.resource.data.collectionId == collectionId
+            && (
+              folderId == 'used-up' ||
+              request.resource.data.isSystem == false
+            );
+          allow update: if isOwner(uid)
+            && request.resource.data.ownerUid == uid
+            && request.resource.data.collectionId == collectionId
+            && (
+              (
+                folderId == 'used-up' &&
+                request.resource.data.isSystem == true
+              ) ||
+              (
+                folderId != 'used-up' &&
+                request.resource.data.isSystem == resource.data.isSystem
+              )
+            );
+          allow delete: if isOwner(uid)
+            && folderId != 'used-up'
+            && resource.data.isSystem != true;
+        }
       }
     }
   }

@@ -21,6 +21,14 @@ void main() {
         FirestorePaths.yarn('uid-1', 'default', 'yarn-1'),
         'users/uid-1/stashCollections/default/yarns/yarn-1',
       );
+      expect(
+        FirestorePaths.folders('uid-1', 'default'),
+        'users/uid-1/stashCollections/default/folders',
+      );
+      expect(
+        FirestorePaths.folder('uid-1', 'default', 'used-up'),
+        'users/uid-1/stashCollections/default/folders/used-up',
+      );
     });
   });
 
@@ -70,6 +78,31 @@ void main() {
         {'fiber': 'Merino', 'percentage': 100},
       ]);
       expect(data['folderName'], 'Sweaters');
+    });
+
+    test('serializes stash folder display and yarn membership fields', () {
+      final folder = StashFolder(
+        id: FirestoreDocumentIds.defaultUsedUpFolder,
+        ownerUid: 'uid-1',
+        collectionId: FirestoreDocumentIds.defaultStashCollection,
+        name: 'Used up',
+        iconKey: 'circleCheck',
+        colorValue: 0xFFEADFD5,
+        yarnIds: const ['yarn-1'],
+        isSystem: true,
+        createdAt: DateTime.utc(2026),
+        updatedAt: DateTime.utc(2026),
+      );
+
+      final data = folder.toFirestore();
+
+      expect(data['ownerUid'], 'uid-1');
+      expect(data['collectionId'], 'default');
+      expect(data['name'], 'Used up');
+      expect(data['iconKey'], 'circleCheck');
+      expect(data['colorValue'], 0xFFEADFD5);
+      expect(data['yarnIds'], ['yarn-1']);
+      expect(data['isSystem'], isTrue);
     });
   });
 }

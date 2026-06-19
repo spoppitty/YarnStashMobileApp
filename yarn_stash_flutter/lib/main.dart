@@ -8,6 +8,7 @@ import 'package:firebase_core/firebase_core.dart';
 
 import 'app_style.dart';
 import 'data/models/yarn.dart';
+import 'data/models/stash_folder.dart';
 import 'data/services/auth_service.dart';
 import 'firebase_options.dart';
 import 'screens.dart';
@@ -71,12 +72,12 @@ class _YarnStashRootState extends State<YarnStashRoot> {
   int _currentTab = 0;
   AppScreen _yarnDetailBackScreen = AppScreen.collection;
   bool _addYarnStartsBlank = false;
-  String _folderName = 'Sweaters';
   String _accountSummary = 'Email, password, profile';
   String _unitSummary = 'Yards / Grams';
   String? _profileBootstrapUid;
   String? _selectedYarnId;
   String? _selectedYarnCollectionId;
+  String? _selectedFolderId;
 
   @override
   void initState() {
@@ -111,13 +112,11 @@ class _YarnStashRootState extends State<YarnStashRoot> {
     });
   }
 
-  void _openYarnDetailPlaceholder(AppScreen backScreen) {
+  void _openFolderDetail(StashFolder folder) {
     setState(() {
-      _yarnDetailBackScreen = backScreen;
-      _selectedYarnId = null;
-      _selectedYarnCollectionId = null;
-      _screen = AppScreen.yarnDetail;
-      _currentTab = backScreen == AppScreen.folderDetail ? 2 : 0;
+      _selectedFolderId = folder.id;
+      _screen = AppScreen.folderDetail;
+      _currentTab = 2;
     });
   }
 
@@ -149,6 +148,7 @@ class _YarnStashRootState extends State<YarnStashRoot> {
       _currentTab = 0;
       _selectedYarnId = null;
       _selectedYarnCollectionId = null;
+      _selectedFolderId = null;
     });
   }
 
@@ -282,19 +282,27 @@ class _YarnStashRootState extends State<YarnStashRoot> {
       AppScreen.editYarn => YarnFormScreen(
         isEditing: true,
         userId: user!.uid,
+        collectionId:
+            _selectedYarnCollectionId ?? _authService.defaultStashCollectionId,
+        yarnId: _selectedYarnId,
         onBack: () => _go(AppScreen.yarnDetail),
         onPrimary: () => _go(AppScreen.yarnDetail),
       ),
       AppScreen.folders => FoldersScreen(
-        onFolderTap: () => _go(AppScreen.folderDetail),
+        userId: user!.uid,
+        collectionId: _authService.defaultStashCollectionId,
+        onFolderTap: _openFolderDetail,
       ),
       AppScreen.folderDetail => FolderDetailScreen(
-        folderName: _folderName,
+        userId: user!.uid,
+        collectionId: _authService.defaultStashCollectionId,
+        folderId: _selectedFolderId,
         onBack: () => _go(AppScreen.folders),
-        onFolderNameChanged: (name) => setState(() => _folderName = name),
-        onYarnTap: () => _openYarnDetailPlaceholder(AppScreen.folderDetail),
+        onYarnTap: (yarn) => _openYarnDetail(AppScreen.folderDetail, yarn),
       ),
       AppScreen.profile => ProfileScreen(
+        userId: user!.uid,
+        collectionId: _authService.defaultStashCollectionId,
         displayName: _profileName(user),
         onSettings: () => _go(AppScreen.settings),
       ),
