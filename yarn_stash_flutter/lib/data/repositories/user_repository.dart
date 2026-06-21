@@ -9,13 +9,15 @@ class UserRepository {
 
   final FirebaseFirestore _firestore;
 
+  DocumentReference<Map<String, dynamic>> _userMapRef(String uid) {
+    return _firestore.doc(FirestorePaths.user(uid));
+  }
+
   DocumentReference<AppUser> userRef(String uid) {
-    return _firestore
-        .doc(FirestorePaths.user(uid))
-        .withConverter<AppUser>(
-          fromFirestore: (snapshot, _) => AppUser.fromFirestore(snapshot),
-          toFirestore: (user, _) => user.toFirestore(),
-        );
+    return _userMapRef(uid).withConverter<AppUser>(
+      fromFirestore: (snapshot, _) => AppUser.fromFirestore(snapshot),
+      toFirestore: (user, _) => user.toFirestore(),
+    );
   }
 
   Stream<AppUser?> watchUser(String uid) {
@@ -27,7 +29,11 @@ class UserRepository {
     return snapshot.data();
   }
 
-  Future<void> upsertUser(AppUser user) {
-    return userRef(user.uid).set(user, SetOptions(merge: true));
+  Future<void> upsertUser(AppUser user) async {
+    await userRef(user.uid).set(user, SetOptions(merge: true));
+    await _userMapRef(user.uid).update({
+      'defaultLengthUnit': FieldValue.delete(),
+      'defaultWeightUnit': FieldValue.delete(),
+    });
   }
 }

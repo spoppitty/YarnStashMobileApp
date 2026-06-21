@@ -1,8 +1,10 @@
 export 'firestore_paths.dart';
 export 'models/app_user.dart';
+export 'models/ravelry_yarn.dart';
 export 'models/stash_collection.dart';
 export 'models/stash_folder.dart';
 export 'models/yarn.dart';
+export 'repositories/ravelry_yarn_catalog_repository.dart';
 export 'repositories/stash_collection_repository.dart';
 export 'repositories/stash_folder_repository.dart';
 export 'repositories/user_repository.dart';

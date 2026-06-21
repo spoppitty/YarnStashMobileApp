@@ -33,7 +33,7 @@ void main() {
   });
 
   group('Firestore models', () {
-    test('serializes user preferences with stable enum values', () {
+    test('serializes user profile fields without stash preferences', () {
       final user = AppUser(
         uid: 'uid-1',
         email: 'sarah@example.com',
@@ -45,8 +45,10 @@ void main() {
       final data = user.toFirestore();
 
       expect(data['uid'], 'uid-1');
-      expect(data['defaultLengthUnit'], 'yards');
-      expect(data['defaultWeightUnit'], 'grams');
+      expect(data['email'], 'sarah@example.com');
+      expect(data['displayName'], 'Sarah');
+      expect(data.containsKey('defaultLengthUnit'), isFalse);
+      expect(data.containsKey('defaultWeightUnit'), isFalse);
     });
 
     test('serializes yarn ownership and status fields', () {
@@ -103,6 +105,31 @@ void main() {
       expect(data['colorValue'], 0xFFEADFD5);
       expect(data['yarnIds'], ['yarn-1']);
       expect(data['isSystem'], isTrue);
+    });
+
+    test('normalizes Ravelry yarn catalog payloads', () {
+      final yarn = RavelryYarnCatalogItem.fromJson({
+        'id': 123,
+        'name': 'Rios',
+        'permalink': 'malabrigo-yarn-rios',
+        'yarn_company_name': 'Malabrigo Yarn',
+        'yarn_weight_name': 'Worsted',
+        'fiber_content': '100% Merino',
+        'yardage': 210,
+        'grams': 100,
+        'first_photo': {'small_url': 'https://example.com/rios.jpg'},
+      });
+
+      expect(yarn.id, 123);
+      expect(yarn.name, 'Rios');
+      expect(yarn.brandName, 'Malabrigo Yarn');
+      expect(yarn.weightName, 'Worsted');
+      expect(yarn.fiberContents.single.fiber, 'Merino');
+      expect(yarn.fiberContents.single.percentage, 100);
+      expect(yarn.yardage, 210);
+      expect(yarn.unitWeightGrams, 100);
+      expect(yarn.imageUrl, 'https://example.com/rios.jpg');
+      expect(yarn.chips, ['Worsted', '100% Merino']);
     });
   });
 }

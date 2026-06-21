@@ -1,0 +1,14 @@
+{
+  "name": "yarn-stash-functions",
+  "description": "Firebase Cloud Functions for Yarn Stash.",
+  "private": true,
+  "main": "index.js",
+  "scripts": {
+    "check": "node --check index.js",
+    "serve": "firebase emulators:start --only functions",
+    "deploy": "firebase deploy --only functions"
+  },
+  "dependencies": {
+    "firebase-functions": "^6.0.0"
+  }
+}

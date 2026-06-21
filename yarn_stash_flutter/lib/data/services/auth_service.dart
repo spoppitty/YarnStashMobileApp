@@ -6,6 +6,12 @@ import '../repositories/stash_collection_repository.dart';
 import '../repositories/stash_folder_repository.dart';
 import '../repositories/user_repository.dart';
 
+class UserProfileUpdateResult {
+  const UserProfileUpdateResult({required this.emailVerificationSent});
+
+  final bool emailVerificationSent;
+}
+
 class AuthService {
   AuthService({
     FirebaseAuth? firebaseAuth,
@@ -71,6 +77,62 @@ class AuthService {
     return _firebaseAuth.sendPasswordResetEmail(email: email.trim());
   }
 
+  Future<UserProfileUpdateResult> updateSignedInUserProfile({
+    required String displayName,
+    required String email,
+  }) async {
+    final user = currentUser;
+    if (user == null) {
+      throw StateError('Cannot update a profile without a signed-in user.');
+    }
+
+    final trimmedDisplayName = displayName.trim();
+    final trimmedEmail = email.trim();
+    if (trimmedDisplayName.isEmpty) {
+      throw ArgumentError.value(displayName, 'displayName', 'Required');
+    }
+
+    final now = DateTime.now();
+    final existingUser = await _userRepository.getUser(user.uid);
+    final currentAuthEmail = user.email?.trim();
+    final existingEmail = existingUser?.email?.trim();
+    var persistedEmail = currentAuthEmail?.isNotEmpty == true
+        ? currentAuthEmail
+        : existingEmail;
+    var emailVerificationSent = false;
+
+    if ((user.displayName ?? '').trim() != trimmedDisplayName) {
+      await user.updateDisplayName(trimmedDisplayName);
+    }
+
+    if (trimmedEmail.isNotEmpty && trimmedEmail != currentAuthEmail) {
+      await user.verifyBeforeUpdateEmail(trimmedEmail);
+      emailVerificationSent = true;
+    } else if (trimmedEmail.isNotEmpty) {
+      persistedEmail = trimmedEmail;
+    }
+
+    await _userRepository.upsertUser(
+      (existingUser ??
+              AppUser(
+                uid: user.uid,
+                email: persistedEmail,
+                displayName: trimmedDisplayName,
+                createdAt: now,
+                updatedAt: now,
+              ))
+          .copyWith(
+            email: persistedEmail,
+            displayName: trimmedDisplayName,
+            updatedAt: now,
+          ),
+    );
+
+    return UserProfileUpdateResult(
+      emailVerificationSent: emailVerificationSent,
+    );
+  }
+
   Future<void> signOut() {
     return _firebaseAuth.signOut();
   }
@@ -106,8 +168,6 @@ class AuthService {
         uid: uid,
         email: email,
         displayName: resolvedDisplayName,
-        defaultLengthUnit: existingUser?.defaultLengthUnit ?? LengthUnit.yards,
-        defaultWeightUnit: existingUser?.defaultWeightUnit ?? WeightUnit.grams,
         createdAt: existingUser?.createdAt ?? now,
         updatedAt: now,
       ),

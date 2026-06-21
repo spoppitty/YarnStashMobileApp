@@ -7,6 +7,7 @@ import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:firebase_core/firebase_core.dart';
 
 import 'app_style.dart';
+import 'data/models/ravelry_yarn.dart';
 import 'data/models/yarn.dart';
 import 'data/models/stash_folder.dart';
 import 'data/services/auth_service.dart';
@@ -72,8 +73,7 @@ class _YarnStashRootState extends State<YarnStashRoot> {
   int _currentTab = 0;
   AppScreen _yarnDetailBackScreen = AppScreen.collection;
   bool _addYarnStartsBlank = false;
-  String _accountSummary = 'Email, password, profile';
-  String _unitSummary = 'Yards / Grams';
+  RavelryYarnCatalogItem? _selectedCatalogYarn;
   String? _profileBootstrapUid;
   String? _selectedYarnId;
   String? _selectedYarnCollectionId;
@@ -120,9 +120,13 @@ class _YarnStashRootState extends State<YarnStashRoot> {
     });
   }
 
-  void _openAddYarn({required bool startBlank}) {
+  void _openAddYarn({
+    required bool startBlank,
+    RavelryYarnCatalogItem? catalogYarn,
+  }) {
     setState(() {
       _addYarnStartsBlank = startBlank;
+      _selectedCatalogYarn = catalogYarn;
       _screen = AppScreen.addYarn;
       _currentTab = 1;
     });
@@ -149,6 +153,7 @@ class _YarnStashRootState extends State<YarnStashRoot> {
       _selectedYarnId = null;
       _selectedYarnCollectionId = null;
       _selectedFolderId = null;
+      _selectedCatalogYarn = null;
     });
   }
 
@@ -203,24 +208,6 @@ class _YarnStashRootState extends State<YarnStashRoot> {
     return 'Your stash';
   }
 
-  String _accountSummaryFor(User? user) {
-    final displayName = user?.displayName?.trim();
-    final email = user?.email?.trim();
-
-    if (displayName != null &&
-        displayName.isNotEmpty &&
-        email != null &&
-        email.isNotEmpty) {
-      return '$displayName / $email';
-    }
-
-    if (email != null && email.isNotEmpty) {
-      return email;
-    }
-
-    return _accountSummary;
-  }
-
   void _ensureProfileFor(User? user) {
     if (user == null || _profileBootstrapUid == user.uid) {
       return;
@@ -258,16 +245,18 @@ class _YarnStashRootState extends State<YarnStashRoot> {
       AppScreen.collection => CollectionScreen(
         userId: user!.uid,
         onYarnTap: (yarn) => _openYarnDetail(AppScreen.collection, yarn),
-        onAddYarn: () => _openAddYarn(startBlank: true),
+        onAddYarn: () => _go(AppScreen.search),
       ),
       AppScreen.search => SearchCatalogScreen(
-        onAddYarn: () => _openAddYarn(startBlank: false),
+        onAddYarn: (catalogYarn) =>
+            _openAddYarn(startBlank: false, catalogYarn: catalogYarn),
         onAddCustomYarn: () => _openAddYarn(startBlank: true),
       ),
       AppScreen.addYarn => YarnFormScreen(
         isEditing: false,
         userId: user!.uid,
         startBlank: _addYarnStartsBlank,
+        catalogYarn: _selectedCatalogYarn,
         onBack: () => _go(AppScreen.search),
         onPrimary: () => _go(AppScreen.collection),
       ),
@@ -307,13 +296,13 @@ class _YarnStashRootState extends State<YarnStashRoot> {
         onSettings: () => _go(AppScreen.settings),
       ),
       AppScreen.settings => SettingsScreen(
-        accountSummary: _accountSummaryFor(user),
-        unitSummary: _unitSummary,
+        userId: user!.uid,
+        authService: _authService,
+        currentDisplayName: user.displayName,
+        currentEmail: user.email,
         onBack: () => _go(AppScreen.profile),
         onSignOut: _signOut,
-        onAccountChanged: (summary) =>
-            setState(() => _accountSummary = summary),
-        onUnitsChanged: (summary) => setState(() => _unitSummary = summary),
+        onProfileChanged: () => setState(() {}),
       ),
     };
   }

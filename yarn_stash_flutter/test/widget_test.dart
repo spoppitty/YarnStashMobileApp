@@ -45,6 +45,14 @@ class _FakeAuthService implements AuthService {
   Future<void> signOut() {
     throw UnimplementedError();
   }
+
+  @override
+  Future<UserProfileUpdateResult> updateSignedInUserProfile({
+    required String displayName,
+    required String email,
+  }) {
+    throw UnimplementedError();
+  }
 }
 
 void main() {

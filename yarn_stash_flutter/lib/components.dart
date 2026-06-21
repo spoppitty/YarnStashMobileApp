@@ -275,12 +275,16 @@ class SearchBox extends StatefulWidget {
     required this.text,
     this.highlighted = false,
     this.trailingIcon,
+    this.controller,
+    this.onChanged,
     this.onTap,
   });
 
   final String text;
   final bool highlighted;
   final FaIconData? trailingIcon;
+  final TextEditingController? controller;
+  final ValueChanged<String>? onChanged;
   final VoidCallback? onTap;
 
   @override
@@ -288,18 +292,29 @@ class SearchBox extends StatefulWidget {
 }
 
 class _SearchBoxState extends State<SearchBox> {
-  late final TextEditingController _controller;
+  late TextEditingController _controller;
   bool _hasText = false;
 
   @override
   void initState() {
     super.initState();
-    _controller = TextEditingController()..addListener(_handleTextChanged);
+    _controller = widget.controller ?? TextEditingController();
+    _controller.addListener(_handleTextChanged);
+    _hasText = _controller.text.isNotEmpty;
   }
 
   @override
   void didUpdateWidget(SearchBox oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller) {
+      _controller.removeListener(_handleTextChanged);
+      if (oldWidget.controller == null) {
+        _controller.dispose();
+      }
+      _controller = widget.controller ?? TextEditingController();
+      _controller.addListener(_handleTextChanged);
+      _hasText = _controller.text.isNotEmpty;
+    }
     if (oldWidget.text != widget.text) {
       setState(() {});
     }
@@ -307,6 +322,7 @@ class _SearchBoxState extends State<SearchBox> {
 
   void _handleTextChanged() {
     final hasText = _controller.text.isNotEmpty;
+    widget.onChanged?.call(_controller.text);
     if (hasText != _hasText) {
       setState(() => _hasText = hasText);
     }
@@ -319,7 +335,9 @@ class _SearchBoxState extends State<SearchBox> {
   @override
   void dispose() {
     _controller.removeListener(_handleTextChanged);
-    _controller.dispose();
+    if (widget.controller == null) {
+      _controller.dispose();
+    }
     super.dispose();
   }
 
@@ -527,11 +545,7 @@ class StatCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [AppColors.card, Color(0xFFFFF5ED)],
-        ),
+        color: AppColors.card,
         borderRadius: BorderRadius.circular(26),
         border: Border.all(color: AppColors.line),
       ),
