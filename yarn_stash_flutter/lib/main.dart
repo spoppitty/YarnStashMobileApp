@@ -272,10 +272,17 @@ class _YarnStashRootState extends State<YarnStashRoot> {
         isEditing: true,
         userId: user!.uid,
         collectionId:
-            _selectedYarnCollectionId ?? _authService.defaultStashCollectionId,
+        _selectedYarnCollectionId ?? _authService.defaultStashCollectionId,
         yarnId: _selectedYarnId,
         onBack: () => _go(AppScreen.yarnDetail),
         onPrimary: () => _go(AppScreen.yarnDetail),
+        onDelete: () {
+          setState(() {
+            _selectedYarnId = null;
+            _selectedYarnCollectionId = null;
+            _screen = AppScreen.collection;
+          });
+        },
       ),
       AppScreen.folders => FoldersScreen(
         userId: user!.uid,

@@ -2358,6 +2358,7 @@ class YarnFormScreen extends StatefulWidget {
     required this.userId,
     required this.onBack,
     required this.onPrimary,
+    this.onDelete,
     this.startBlank = false,
     this.collectionId,
     this.yarnId,
@@ -2370,6 +2371,7 @@ class YarnFormScreen extends StatefulWidget {
   final String userId;
   final VoidCallback onBack;
   final VoidCallback onPrimary;
+  final VoidCallback? onDelete;
   final bool startBlank;
   final String? collectionId;
   final String? yarnId;
@@ -2521,6 +2523,28 @@ class _YarnFormScreenState extends State<YarnFormScreen> {
 
     for (final folder in folders) {
       if (folder.name == _folder) return folder;
+    }
+
+    return null;
+  }
+
+  bool _selectedFolderIsUsedUp(List<StashFolder> folders) {
+    final selectedFolder = _selectedFolder(folders);
+
+    if (selectedFolder != null) {
+      return selectedFolder.isDefaultUsedUp ||
+          selectedFolder.name.trim().toLowerCase() == 'used up';
+    }
+
+    return _folder.trim().toLowerCase() == 'used up';
+  }
+
+  StashFolder? _usedUpFolder(List<StashFolder> folders) {
+    for (final folder in folders) {
+      if (folder.isDefaultUsedUp ||
+          folder.name.trim().toLowerCase() == 'used up') {
+        return folder;
+      }
     }
 
     return null;
@@ -2771,6 +2795,222 @@ class _YarnFormScreenState extends State<YarnFormScreen> {
     return fiberContents;
   }
 
+  Future<void> _moveEditingYarnToUsedUp(List<StashFolder> folders) async {
+    if (_isSaving) return;
+
+    final editingYarn = _editingYarn;
+    if (editingYarn == null) {
+      setState(() {
+        _errorMessage = 'Unable to load yarn details. Try again.';
+      });
+      return;
+    }
+
+    final usedUpFolder = _usedUpFolder(folders);
+    if (usedUpFolder == null) {
+      setState(() {
+        _errorMessage = 'Unable to find the Used Up folder.';
+      });
+      return;
+    }
+
+    setState(() {
+      _isSaving = true;
+      _errorMessage = null;
+    });
+
+    final nextFolderIds = [usedUpFolder.id];
+
+    try {
+      await _yarnRepository.updateYarn(
+        Yarn(
+          id: editingYarn.id,
+          ownerUid: editingYarn.ownerUid,
+          collectionId: editingYarn.collectionId,
+          brandName: editingYarn.brandName,
+          name: editingYarn.name,
+          colorway: editingYarn.colorway,
+          colorFamily: editingYarn.colorFamily,
+          dyeLot: editingYarn.dyeLot,
+          weightCategory: editingYarn.weightCategory,
+          wpi: editingYarn.wpi,
+          fiberContent: editingYarn.fiberContent,
+          fiberContents: editingYarn.fiberContents,
+          yardage: editingYarn.yardage,
+          unitWeightGrams: editingYarn.unitWeightGrams,
+          needleSize: editingYarn.needleSize,
+          gauge: editingYarn.gauge,
+          skeinCount: editingYarn.skeinCount,
+          priceCents: editingYarn.priceCents,
+          status: YarnStatus.usedUp,
+          imageUrls: editingYarn.imageUrls,
+          folderName: usedUpFolder.name,
+          folderIds: nextFolderIds,
+          notes: editingYarn.notes,
+          createdAt: editingYarn.createdAt,
+          updatedAt: DateTime.now(),
+        ),
+      );
+
+      await _folderRepository.syncYarnMembership(
+        uid: editingYarn.ownerUid,
+        collectionId: editingYarn.collectionId,
+        yarnId: editingYarn.id,
+        previousFolderIds: editingYarn.folderIds,
+        nextFolderIds: nextFolderIds,
+      );
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Yarn moved to Used Up.')),
+      );
+
+      widget.onPrimary();
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _errorMessage = 'Unable to move yarn to Used Up. Try again.';
+      });
+    } finally {
+      if (mounted) {
+        setState(() => _isSaving = false);
+      }
+    }
+  }
+
+  Future<void> _moveEditingYarnIntoStash() async {
+    if (_isSaving) return;
+
+    final editingYarn = _editingYarn;
+    if (editingYarn == null) {
+      setState(() {
+        _errorMessage = 'Unable to load yarn details. Try again.';
+      });
+      return;
+    }
+
+    setState(() {
+      _isSaving = true;
+      _errorMessage = null;
+    });
+
+    try {
+      await _yarnRepository.updateYarn(
+        Yarn(
+          id: editingYarn.id,
+          ownerUid: editingYarn.ownerUid,
+          collectionId: editingYarn.collectionId,
+          brandName: editingYarn.brandName,
+          name: editingYarn.name,
+          colorway: editingYarn.colorway,
+          colorFamily: editingYarn.colorFamily,
+          dyeLot: editingYarn.dyeLot,
+          weightCategory: editingYarn.weightCategory,
+          wpi: editingYarn.wpi,
+          fiberContent: editingYarn.fiberContent,
+          fiberContents: editingYarn.fiberContents,
+          yardage: editingYarn.yardage,
+          unitWeightGrams: editingYarn.unitWeightGrams,
+          needleSize: editingYarn.needleSize,
+          gauge: editingYarn.gauge,
+          skeinCount: editingYarn.skeinCount,
+          priceCents: editingYarn.priceCents,
+          status: YarnStatus.inStash,
+          imageUrls: editingYarn.imageUrls,
+          folderName: null,
+          folderIds: const [],
+          notes: editingYarn.notes,
+          createdAt: editingYarn.createdAt,
+          updatedAt: DateTime.now(),
+        ),
+      );
+
+      await _folderRepository.syncYarnMembership(
+        uid: editingYarn.ownerUid,
+        collectionId: editingYarn.collectionId,
+        yarnId: editingYarn.id,
+        previousFolderIds: editingYarn.folderIds,
+        nextFolderIds: const [],
+      );
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Yarn moved back into your stash.')),
+      );
+
+      widget.onPrimary();
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _errorMessage = 'Unable to move yarn into stash. Try again.';
+      });
+    } finally {
+      if (mounted) {
+        setState(() => _isSaving = false);
+      }
+    }
+  }
+
+  Future<void> _deleteEditingYarn() async {
+    if (_isSaving) return;
+
+    final editingYarn = _editingYarn;
+    if (editingYarn == null) {
+      setState(() {
+        _errorMessage = 'Unable to load yarn details. Try again.';
+      });
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      barrierColor: AppColors.ink.withValues(alpha: 0.35),
+      builder: (context) => const DeleteYarnConfirmDialog(),
+    );
+
+    if (confirmed != true) return;
+
+    setState(() {
+      _isSaving = true;
+      _errorMessage = null;
+    });
+
+    try {
+      await _folderRepository.syncYarnMembership(
+        uid: editingYarn.ownerUid,
+        collectionId: editingYarn.collectionId,
+        yarnId: editingYarn.id,
+        previousFolderIds: editingYarn.folderIds,
+        nextFolderIds: const [],
+      );
+
+      await _yarnRepository.deleteYarn(
+        uid: editingYarn.ownerUid,
+        collectionId: editingYarn.collectionId,
+        yarnId: editingYarn.id,
+      );
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Yarn deleted.')),
+      );
+
+      (widget.onDelete ?? widget.onPrimary)();
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _errorMessage = 'Unable to delete yarn. Try again.';
+      });
+    } finally {
+      if (mounted) {
+        setState(() => _isSaving = false);
+      }
+    }
+  }
+
   Future<void> _saveYarn(List<StashFolder> folders) async {
     if (_isSaving) return;
     FocusScope.of(context).unfocus();
@@ -2801,6 +3041,9 @@ class _YarnFormScreenState extends State<YarnFormScreen> {
     final folderIds = hasFolder ? [selectedFolderId] : const <String>[];
     final fiberContent = yarnFiberContentSummary(fiberContents);
 
+    final isUsedUpFolder = _selectedFolderIsUsedUp(folders);
+    final skeinCount = _parseFirstInt(_ballsController.text) ?? 1;
+
     try {
       if (widget.isEditing) {
         final editingYarn = _editingYarn;
@@ -2830,9 +3073,13 @@ class _YarnFormScreenState extends State<YarnFormScreen> {
             unitWeightGrams: _parseFirstInt(_unitWeightController.text),
             needleSize: _trimmedOrNull(_needleController.text),
             gauge: _trimmedOrNull(_gaugeController.text),
-            skeinCount: _parseFirstInt(_ballsController.text) ?? 1,
+            skeinCount: skeinCount,
             priceCents: _parsePriceCents(_priceController.text),
-            status: editingYarn.status,
+            status: isUsedUpFolder
+                ? YarnStatus.usedUp
+                : editingYarn.status == YarnStatus.usedUp
+                ? YarnStatus.inStash
+                : editingYarn.status,
             imageUrls: editingYarn.imageUrls,
             folderName: folderName,
             folderIds: folderIds,
@@ -2868,8 +3115,9 @@ class _YarnFormScreenState extends State<YarnFormScreen> {
             unitWeightGrams: _parseFirstInt(_unitWeightController.text),
             needleSize: _trimmedOrNull(_needleController.text),
             gauge: _trimmedOrNull(_gaugeController.text),
-            skeinCount: _parseFirstInt(_ballsController.text) ?? 1,
+            skeinCount: skeinCount,
             priceCents: _parsePriceCents(_priceController.text),
+            status: isUsedUpFolder ? YarnStatus.usedUp : YarnStatus.inStash,
             folderName: folderName,
             folderIds: folderIds,
             notes: _trimmedOrNull(_notesController.text),
@@ -3174,15 +3422,27 @@ class _YarnFormScreenState extends State<YarnFormScreen> {
         ),
         if (widget.isEditing) ...[
           const SizedBox(height: 12),
-          const SecondaryButton(
-            label: 'Move to used up',
-            icon: FontAwesomeIcons.boxArchive,
+          SecondaryButton(
+            label: _isSaving
+                ? 'Moving...'
+                : _editingYarn?.status == YarnStatus.usedUp
+                ? 'Move to stash'
+                : 'Move to used up',
+            icon: _editingYarn?.status == YarnStatus.usedUp
+                ? FontAwesomeIcons.basketShopping
+                : FontAwesomeIcons.boxArchive,
+            onTap: _isSaving
+                ? null
+                : _editingYarn?.status == YarnStatus.usedUp
+                ? _moveEditingYarnIntoStash
+                : () => _moveEditingYarnToUsedUp(folders),
           ),
           const SizedBox(height: 12),
-          const SecondaryButton(
-            label: 'Remove from stash',
+          SecondaryButton(
+            label: _isSaving ? 'Deleting...' : 'Remove from stash',
             icon: FontAwesomeIcons.trashCan,
             foregroundColor: AppColors.danger,
+            onTap: _isSaving ? null : _deleteEditingYarn,
           ),
         ],
       ],
@@ -4052,18 +4312,24 @@ class _ProfileStats {
   bool get hasYarn => yarnCount > 0;
 
   factory _ProfileStats.fromStash(List<Yarn> yarns, List<StashFolder> folders) {
-    final totalSkeins = yarns.fold<int>(
+    final activeYarns = yarns
+        .where((yarn) => yarn.status != YarnStatus.usedUp)
+        .toList(growable: false);
+
+    final totalSkeins = activeYarns.fold<int>(
       0,
-      (total, yarn) => total + yarn.skeinCount,
+          (total, yarn) => total + yarn.skeinCount,
     );
-    final totalGrams = yarns.fold<int>(0, (total, yarn) {
+
+    final totalGrams = activeYarns.fold<int>(0, (total, yarn) {
       final grams = yarn.unitWeightGrams;
       return total + (grams == null ? 0 : grams * yarn.skeinCount);
     });
-    final totalYardage = _totalYardageForYarns(yarns);
+
+    final totalYardage = _totalYardageForYarns(activeYarns);
 
     return _ProfileStats(
-      yarnCount: yarns.length,
+      yarnCount: activeYarns.length,
       skeinCount: totalSkeins,
       totalGrams: totalGrams,
       totalYardage: totalYardage,
@@ -4071,9 +4337,9 @@ class _ProfileStats {
       usedUpCount: yarns
           .where((yarn) => yarn.status == YarnStatus.usedUp)
           .length,
-      fiberRows: _topProgressRows(_fiberBreakdown(yarns), maxRows: 4),
-      weightRows: _topProgressRows(_weightBreakdown(yarns), maxRows: 4),
-      statusRows: _topProgressRows(_statusBreakdown(yarns), maxRows: 4),
+      fiberRows: _topProgressRows(_fiberBreakdown(activeYarns), maxRows: 4),
+      weightRows: _topProgressRows(_weightBreakdown(activeYarns), maxRows: 4),
+      statusRows: _topProgressRows(_statusBreakdown(activeYarns), maxRows: 4),
     );
   }
 }
@@ -4613,6 +4879,61 @@ class _FolderEditDialogState extends State<FolderEditDialog> {
                   label: 'Save',
                   height: 48,
                   onTap: _saveFolder,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class DeleteYarnConfirmDialog extends StatelessWidget {
+  const DeleteYarnConfirmDialog({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return ModalCard(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Text(
+            'Delete yarn?',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w900,
+              letterSpacing: tightLetterSpacing,
+            ),
+          ),
+          const SizedBox(height: 10),
+          const Text(
+            'Are you sure you want to delete this yarn?',
+            style: TextStyle(
+              color: AppColors.muted,
+              fontSize: 15,
+              height: 1.35,
+              fontWeight: FontWeight.w700,
+              letterSpacing: tightLetterSpacing,
+            ),
+          ),
+          const SizedBox(height: 20),
+          Row(
+            children: [
+              Expanded(
+                child: PrimaryButton(
+                  label: 'No',
+                  height: 48,
+                  onTap: () => Navigator.pop(context, false),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: SecondaryButton(
+                  label: 'Yes',
+                  foregroundColor: AppColors.danger,
+                  onTap: () => Navigator.pop(context, true),
                 ),
               ),
             ],
