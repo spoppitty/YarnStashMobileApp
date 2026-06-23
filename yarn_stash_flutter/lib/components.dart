@@ -617,15 +617,20 @@ class InfoField extends StatelessWidget {
           FieldLabel(label),
           const SizedBox(height: 4),
           child ??
-              Text(
-                value!,
-                maxLines: 3,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: mutedValue ? AppColors.muted : AppColors.ink,
-                  fontSize: 16,
-                  fontWeight: mutedValue ? FontWeight.w700 : FontWeight.w800,
-                  letterSpacing: tightLetterSpacing,
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                physics: const BouncingScrollPhysics(),
+                child: Text(
+                  value!,
+                  maxLines: 1,
+                  softWrap: false,
+                  overflow: TextOverflow.visible,
+                  style: TextStyle(
+                    color: mutedValue ? AppColors.muted : AppColors.ink,
+                    fontSize: 16,
+                    fontWeight: mutedValue ? FontWeight.w700 : FontWeight.w800,
+                    letterSpacing: tightLetterSpacing,
+                  ),
                 ),
               ),
         ],

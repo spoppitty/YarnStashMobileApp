@@ -118,7 +118,7 @@ _StashYarnItem _stashItemFromYarn(Yarn yarn) {
   final colorway = yarn.colorway?.trim();
   final skeins = yarn.skeinCount == 1 ? '1 skein' : '${yarn.skeinCount} skeins';
   final fiberFilters = _fiberTagsForYarn(yarn);
-  final weight = _cleanText(yarn.weightCategory);
+  final weight = _normalizeWeightName(yarn.weightCategory);
   final colorFamily = _cleanText(yarn.colorFamily);
   final subtitleParts = [
     if (colorway != null && colorway.isNotEmpty) colorway,
@@ -155,8 +155,8 @@ Set<String> _fiberTagsForYarn(Yarn yarn) {
   if (yarn.fiberContents.isNotEmpty) {
     return {
       for (final fiberContent in yarn.fiberContents)
-        if (_cleanText(fiberContent.fiber) != null)
-          _cleanText(fiberContent.fiber)!,
+        if (_normalizeFiberName(fiberContent.fiber) != null)
+          _normalizeFiberName(fiberContent.fiber)!,
     };
   }
 
@@ -168,13 +168,13 @@ Set<String> _fiberTagsForYarn(Yarn yarn) {
     final match = RegExp(r'^\s*(\d+)\s*%\s*(.+?)\s*$').firstMatch(part);
     if (match == null) continue;
 
-    final label = _cleanText(match.group(2));
+    final label = _normalizeFiberName(match.group(2));
     if (label != null) {
       parsedTags.add(label);
     }
   }
 
-  return parsedTags.isEmpty ? {legacy} : parsedTags;
+  return parsedTags.isEmpty ? {_normalizeFiberName(legacy) ?? legacy} : parsedTags;
 }
 
 _StashFilterOptions _filterOptionsForYarns(List<Yarn> yarns) {
@@ -908,14 +908,46 @@ class CollectionScreen extends StatefulWidget {
 
 class _CollectionScreenState extends State<CollectionScreen> {
   late final YarnRepository _yarnRepository;
+  late final TextEditingController _searchController;
+
   Set<String> _activeFilters = const {_allStashFilter};
   _StashSort _activeSort = _StashSort.recentlyAdded;
   _StashSortDirection _sortDirection = _StashSortDirection.descending;
+  String _searchQuery = '';
 
   @override
   void initState() {
     super.initState();
     _yarnRepository = widget.yarnRepository ?? YarnRepository();
+    _searchController = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  bool _matchesSearch(_StashYarnItem item) {
+    final query = _searchQuery.trim().toLowerCase();
+    if (query.isEmpty) return true;
+
+    final yarn = item.yarn;
+    final searchableText = [
+      item.title,
+      item.subtitle,
+      yarn.name,
+      yarn.brandName,
+      yarn.colorway,
+      yarn.colorFamily,
+      yarn.weightCategory,
+      yarn.dyeLot,
+      yarn.notes,
+      yarn.fiberContent,
+      ...yarn.fiberContents.map((fiber) => fiber.fiber),
+    ].whereType<String>().join(' ').toLowerCase();
+
+    return searchableText.contains(query);
   }
 
   bool get _hasActiveFilters => !_activeFilters.contains(_allStashFilter);
@@ -953,14 +985,19 @@ class _CollectionScreenState extends State<CollectionScreen> {
   ) {
     final stashItems = yarns.map(_stashItemFromYarn).toList(growable: false);
     final activeFilters = _validActiveFilters(options);
-    final items = activeFilters.contains(_allStashFilter)
+    final filteredByChips = activeFilters.contains(_allStashFilter)
         ? List<_StashYarnItem>.of(stashItems)
         : stashItems
-              .where(
-                (item) => _matchesActiveFilters(item, options, activeFilters),
-              )
-              .toList(growable: false);
-    return _sortItems(items);
+        .where(
+          (item) => _matchesActiveFilters(item, options, activeFilters),
+    )
+        .toList(growable: false);
+
+    final searchedItems = filteredByChips
+        .where(_matchesSearch)
+        .toList(growable: false);
+
+    return _sortItems(searchedItems);
   }
 
   bool _matchesActiveFilters(
@@ -1053,7 +1090,15 @@ class _CollectionScreenState extends State<CollectionScreen> {
               ),
             ),
             const SizedBox(height: 16),
-            const SearchBox(text: 'Search your collection'),
+            SearchBox(
+              text: 'Search your collection',
+              controller: _searchController,
+              onChanged: (value) {
+                setState(() {
+                  _searchQuery = value;
+                });
+              },
+            ),
             const SizedBox(height: 12),
             _StashControlStrip(
               activeSort: _activeSort,
@@ -1627,6 +1672,7 @@ class _SearchCatalogScreenState extends State<SearchCatalogScreen> {
   List<RavelryYarnCatalogItem> _results = const [];
   bool _isSearching = false;
   bool _hasSearched = false;
+  bool _isOpeningCatalogYarn = false;
   String? _errorMessage;
   String _activeQuery = '';
 
@@ -1697,6 +1743,45 @@ class _SearchCatalogScreenState extends State<SearchCatalogScreen> {
     }
   }
 
+  Future<void> _openCatalogYarn(RavelryYarnCatalogItem yarn) async {
+    if (_isOpeningCatalogYarn) return;
+
+    final yarnId = yarn.id;
+
+    if (yarnId == null) {
+      widget.onAddYarn(yarn);
+      return;
+    }
+
+    setState(() {
+      _isOpeningCatalogYarn = true;
+      _errorMessage = null;
+    });
+
+    try {
+      final detailedYarn = await _catalogRepository.getYarn(yarnId);
+
+      if (!mounted) return;
+      widget.onAddYarn(detailedYarn);
+    } catch (_) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Unable to load full Ravelry details. Opening basic yarn info.',
+          ),
+        ),
+      );
+
+      widget.onAddYarn(yarn);
+    } finally {
+      if (mounted) {
+        setState(() => _isOpeningCatalogYarn = false);
+      }
+    }
+  }
+
   Widget _buildCatalogContent() {
     if (_isSearching) {
       return const Center(
@@ -1740,7 +1825,7 @@ class _SearchCatalogScreenState extends State<SearchCatalogScreen> {
             subtitle: _results[index].brandName,
             chips: _results[index].chips,
             detail: _catalogDetail(_results[index]),
-            onAction: () => widget.onAddYarn(_results[index]),
+            onAction: () => _openCatalogYarn(_results[index]),
             fallbackColor: _catalogFallbackColor(index),
           ),
           if (index != _results.length - 1) const SizedBox(height: 12),
@@ -2290,6 +2375,32 @@ String? _cleanText(String? value) {
   return trimmed;
 }
 
+String? _normalizeFiberName(String? value) {
+  final cleaned = _cleanText(value);
+  if (cleaned == null) return null;
+
+  return cleaned
+      .split(RegExp(r'\s+'))
+      .map((word) {
+    if (word.isEmpty) return word;
+    return word[0].toUpperCase() + word.substring(1).toLowerCase();
+  })
+      .join(' ');
+}
+
+String? _normalizeWeightName(String? value) {
+  final cleaned = _cleanText(value);
+  if (cleaned == null) return null;
+
+  return cleaned
+      .split(RegExp(r'\s+'))
+      .map((word) {
+    if (word.isEmpty) return word;
+    return word[0].toUpperCase() + word.substring(1).toLowerCase();
+  })
+      .join(' ');
+}
+
 String _profileNameFromEmail(String email) {
   return email.split('@').first;
 }
@@ -2482,6 +2593,16 @@ class _YarnFormScreenState extends State<YarnFormScreen> {
     return trimmed.isEmpty ? null : trimmed;
   }
 
+  List<String> _imageUrlsForSave() {
+    final imageUrl = _selectedImageUrl.trim();
+
+    if (imageUrl.isEmpty) {
+      return const [];
+    }
+
+    return [imageUrl];
+  }
+
   String _optionalIntInputText(int? value, String suffix) {
     return value == null ? '' : '$value $suffix';
   }
@@ -2627,7 +2748,7 @@ class _YarnFormScreenState extends State<YarnFormScreen> {
 
     if (catalogYarn != null) {
       final fiberContent = _cleanText(catalogYarn.fiberContent);
-      return [_FiberContentInput(fiber: fiberContent ?? '')];
+      return [_FiberContentInput(fiber: fiberContent ?? '', percentage: '')];
     }
 
     return [
@@ -2752,12 +2873,14 @@ class _YarnFormScreenState extends State<YarnFormScreen> {
     final fiberContents = <YarnFiberContent>[];
 
     for (final row in _fiberRows) {
-      final fiber = row.fiberController.text.trim();
+      final rawFiber = row.fiberController.text.trim();
+      final fiber = _normalizeFiberName(rawFiber);
       final percentageText = row.percentageController.text.trim();
-      if (fiber.isEmpty && percentageText.isEmpty) continue;
+
+      if ((fiber == null || fiber.isEmpty) && percentageText.isEmpty) continue;
 
       final percentage = _parseFirstInt(percentageText);
-      if (fiber.isEmpty || percentage == null || percentage <= 0) {
+      if (fiber == null || fiber.isEmpty || percentage == null || percentage <= 0) {
         setState(() {
           _errorMessage =
               'Each fiber needs a name and a percentage from 1 to 100.';
@@ -2917,7 +3040,9 @@ class _YarnFormScreenState extends State<YarnFormScreen> {
           skeinCount: editingYarn.skeinCount,
           priceCents: editingYarn.priceCents,
           status: YarnStatus.inStash,
-          imageUrls: editingYarn.imageUrls,
+          imageUrls: _imageUrlsForSave().isEmpty
+              ? editingYarn.imageUrls
+              : _imageUrlsForSave(),
           folderName: null,
           folderIds: const [],
           notes: editingYarn.notes,
@@ -3065,7 +3190,7 @@ class _YarnFormScreenState extends State<YarnFormScreen> {
             colorway: _trimmedOrNull(_colorwayController.text),
             colorFamily: _colorFamily,
             dyeLot: _trimmedOrNull(_dyeLotController.text),
-            weightCategory: _trimmedOrNull(_weightController.text),
+            weightCategory: _normalizeWeightName(_weightController.text),
             wpi: _parseFirstInt(_wpiController.text),
             fiberContent: fiberContent,
             fiberContents: fiberContents,
@@ -3107,7 +3232,7 @@ class _YarnFormScreenState extends State<YarnFormScreen> {
             colorway: _trimmedOrNull(_colorwayController.text),
             colorFamily: _colorFamily,
             dyeLot: _trimmedOrNull(_dyeLotController.text),
-            weightCategory: _trimmedOrNull(_weightController.text),
+            weightCategory: _normalizeWeightName(_weightController.text),
             wpi: _parseFirstInt(_wpiController.text),
             fiberContent: fiberContent,
             fiberContents: fiberContents,
@@ -3118,6 +3243,7 @@ class _YarnFormScreenState extends State<YarnFormScreen> {
             skeinCount: skeinCount,
             priceCents: _parsePriceCents(_priceController.text),
             status: isUsedUpFolder ? YarnStatus.usedUp : YarnStatus.inStash,
+            imageUrls: _imageUrlsForSave(),
             folderName: folderName,
             folderIds: folderIds,
             notes: _trimmedOrNull(_notesController.text),
@@ -3423,10 +3549,8 @@ class _YarnFormScreenState extends State<YarnFormScreen> {
         if (widget.isEditing) ...[
           const SizedBox(height: 12),
           SecondaryButton(
-            label: _isSaving
-                ? 'Moving...'
-                : _editingYarn?.status == YarnStatus.usedUp
-                ? 'Move to stash'
+            label: _editingYarn?.status == YarnStatus.usedUp
+                ? 'Move into stash'
                 : 'Move to used up',
             icon: _editingYarn?.status == YarnStatus.usedUp
                 ? FontAwesomeIcons.basketShopping
@@ -3439,7 +3563,7 @@ class _YarnFormScreenState extends State<YarnFormScreen> {
           ),
           const SizedBox(height: 12),
           SecondaryButton(
-            label: _isSaving ? 'Deleting...' : 'Remove from stash',
+            label: 'Remove from stash',
             icon: FontAwesomeIcons.trashCan,
             foregroundColor: AppColors.danger,
             onTap: _isSaving ? null : _deleteEditingYarn,
@@ -4067,7 +4191,7 @@ class _FolderDetailMessageState extends StatelessWidget {
   }
 }
 
-class _FolderDetailContent extends StatelessWidget {
+class _FolderDetailContent extends StatefulWidget {
   const _FolderDetailContent({
     required this.folder,
     required this.yarns,
@@ -4083,7 +4207,52 @@ class _FolderDetailContent extends StatelessWidget {
   final ValueChanged<Yarn> onYarnTap;
 
   @override
+  State<_FolderDetailContent> createState() => _FolderDetailContentState();
+}
+
+class _FolderDetailContentState extends State<_FolderDetailContent> {
+  late final TextEditingController _searchController;
+  String _searchQuery = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _searchController = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  bool _matchesSearch(Yarn yarn) {
+    final query = _searchQuery.trim().toLowerCase();
+    if (query.isEmpty) return true;
+
+    final searchableText = [
+      _yarnTitle(yarn),
+      _yarnSubtitle(yarn),
+      yarn.name,
+      yarn.brandName,
+      yarn.colorway,
+      yarn.colorFamily,
+      yarn.weightCategory,
+      yarn.dyeLot,
+      yarn.notes,
+      yarn.fiberContent,
+      ...yarn.fiberContents.map((fiber) => fiber.fiber),
+    ].whereType<String>().join(' ').toLowerCase();
+
+    return searchableText.contains(query);
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final folder = widget.folder;
+    final filteredYarns = widget.yarns
+        .where(_matchesSearch)
+        .toList(growable: false);
     final background = _folderBackgroundColor(folder);
     return ListView(
       padding: const EdgeInsets.only(bottom: 28),
@@ -4091,12 +4260,12 @@ class _FolderDetailContent extends StatelessWidget {
         NavRow(
           leading: CircleIconButton(
             icon: FontAwesomeIcons.chevronLeft,
-            onTap: onBack,
+            onTap: widget.onBack,
           ),
           trailing: CircleIconButton(
             icon: FontAwesomeIcons.pen,
             label: 'Edit folder',
-            onTap: onEdit,
+            onTap: widget.onEdit,
           ),
         ),
         const SizedBox(height: 20),
@@ -4122,7 +4291,7 @@ class _FolderDetailContent extends StatelessWidget {
               NavTitle(folder.name),
               const SizedBox(height: 8),
               Text(
-                _folderSubtitle(folder, yarns),
+                _folderSubtitle(folder, widget.yarns),
                 style: const TextStyle(
                   color: AppColors.muted,
                   fontSize: 15,
@@ -4134,28 +4303,41 @@ class _FolderDetailContent extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 20),
-        SearchBox(text: 'Search in ${folder.name}'),
+        SearchBox(
+          text: 'Search in ${folder.name}',
+          controller: _searchController,
+          onChanged: (value) {
+            setState(() {
+              _searchQuery = value;
+            });
+          },
+        ),
         const SizedBox(height: 16),
-        if (yarns.isEmpty)
+        if (widget.yarns.isEmpty)
           const _FolderLoadState(
             title: 'No yarns here yet',
             message:
-                'Assign yarn to this folder from the add or edit yarn page.',
+            'Assign yarn to this folder from the add or edit yarn page.',
+          )
+        else if (filteredYarns.isEmpty)
+          const _FolderLoadState(
+            title: 'No yarn matches your search',
+            message: 'Try searching by name, brand, colorway, weight, or fiber.',
           )
         else
-          for (var index = 0; index < yarns.length; index++) ...[
+          for (var index = 0; index < filteredYarns.length; index++) ...[
             _YarnListCard(
-              imageUrl: yarns[index].imageUrls.isEmpty
+              imageUrl: filteredYarns[index].imageUrls.isEmpty
                   ? ''
-                  : yarns[index].imageUrls.first,
-              title: _yarnTitle(yarns[index]),
-              subtitle: _folderYarnSubtitle(yarns[index]),
-              detail: _folderYarnDetail(yarns[index]),
+                  : filteredYarns[index].imageUrls.first,
+              title: _yarnTitle(filteredYarns[index]),
+              subtitle: _folderYarnSubtitle(filteredYarns[index]),
+              detail: _folderYarnDetail(filteredYarns[index]),
               showChevron: true,
-              fallbackColor: _fallbackColorForYarn(yarns[index]),
-              onTap: () => onYarnTap(yarns[index]),
+              fallbackColor: _fallbackColorForYarn(filteredYarns[index]),
+              onTap: () => widget.onYarnTap(filteredYarns[index]),
             ),
-            if (index != yarns.length - 1) const SizedBox(height: 12),
+            if (index != filteredYarns.length - 1) const SizedBox(height: 12),
           ],
       ],
     );
@@ -4362,7 +4544,7 @@ Map<String, double> _fiberBreakdown(List<Yarn> yarns) {
     final multiplier = yarn.skeinCount <= 0 ? 1 : yarn.skeinCount;
     if (yarn.fiberContents.isNotEmpty) {
       for (final fiberContent in yarn.fiberContents) {
-        final label = _cleanText(fiberContent.fiber) ?? ' ';
+        final label = _normalizeFiberName(fiberContent.fiber) ?? ' ';
         breakdown[label] =
             (breakdown[label] ?? 0) + fiberContent.percentage * multiplier;
       }
@@ -4381,13 +4563,14 @@ Map<String, double> _fiberBreakdown(List<Yarn> yarns) {
       if (match == null) continue;
 
       parsedAny = true;
-      final label = _cleanText(match.group(2)) ?? ' ';
+      final label = _normalizeFiberName(match.group(2)) ?? ' ';
       final percent = int.tryParse(match.group(1)!) ?? 0;
       breakdown[label] = (breakdown[label] ?? 0) + percent * multiplier;
     }
 
     if (!parsedAny) {
-      breakdown[legacy] = (breakdown[legacy] ?? 0) + 100 * multiplier;
+      final label = _normalizeFiberName(legacy) ?? legacy;
+      breakdown[label] = (breakdown[label] ?? 0) + 100 * multiplier;
     }
   }
 
@@ -4398,7 +4581,7 @@ Map<String, double> _weightBreakdown(List<Yarn> yarns) {
   final breakdown = <String, double>{};
 
   for (final yarn in yarns) {
-    final label = _cleanText(yarn.weightCategory) ?? ' ';
+    final label = _normalizeWeightName(yarn.weightCategory) ?? ' ';
     final amount = yarn.skeinCount <= 0 ? 1 : yarn.skeinCount;
     breakdown[label] = (breakdown[label] ?? 0) + amount;
   }

@@ -77,10 +77,14 @@ class RavelryYarnCatalogItem {
           _int(json['yarn_weight_grams']) ??
           _int(json['skein_weight_grams']),
       needleSize:
-          _string(json['needle_size']) ??
+      _string(json['needle_size']) ??
           _string(json['needle_sizes']) ??
-          _needleSizeSummary(json['needle_sizes']),
-      gauge: _string(json['gauge']),
+          _needleSizeSummary(json['needle_sizes']) ??
+          _needleSizeSummary(json['needles']) ??
+          _needleSizeRange(json),
+      gauge: _string(json['gauge']) ??
+          _string(json['gauge_description']) ??
+          _gaugeSummary(json),
       imageUrl:
           _photoUrl(json['first_photo']) ??
           _photoUrl(_firstListItem(json['photos'])),
@@ -140,30 +144,116 @@ String? _needleSizeSummary(Object? value) {
   return labels.isEmpty ? null : labels.join(', ');
 }
 
-List<YarnFiberContent> _fiberContentsFromJson(Map<String, dynamic> json) {
-  final rawFibers = json['fibers'];
+String? _needleSizeRange(Map<dynamic, dynamic> json) {
+  final minNeedle =
+      _needleSizeLabel(json['min_needle_size']) ??
+          _needleSizeLabel(json['min_needle']);
+
+  final maxNeedle =
+      _needleSizeLabel(json['max_needle_size']) ??
+          _needleSizeLabel(json['max_needle']);
+
+  if (minNeedle != null && maxNeedle != null) {
+    if (minNeedle == maxNeedle) return minNeedle;
+    return '$minNeedle - $maxNeedle';
+  }
+
+  return minNeedle ?? maxNeedle;
+}
+
+String? _needleSizeLabel(Object? value) {
+  if (value == null) return null;
+
+  if (value is String || value is num || value is bool) {
+    return _string(value);
+  }
+
+  if (value is Map) {
+    return _string(value['name']) ??
+        _string(value['us']) ??
+        _string(value['metric']) ??
+        _string(value['pretty_name']) ??
+        _string(value['description']);
+  }
+
+  return null;
+}
+
+String? _gaugeSummary(Map<dynamic, dynamic> json) {
+  final gauge = _string(json['gauge']);
+  final divisor = _string(json['gauge_divisor']);
+
+  if (gauge != null && divisor != null) {
+    return '$gauge sts / $divisor';
+  }
+
+  final stitchGauge =
+      _int(json['gauge_stitches']) ??
+          _int(json['stitch_gauge']) ??
+          _int(json['stitches_per_4_inches']);
+
+  final rowGauge =
+      _int(json['gauge_rows']) ??
+          _int(json['row_gauge']);
+
+  if (stitchGauge != null && rowGauge != null) {
+    return '$stitchGauge sts / $rowGauge rows';
+  }
+
+  if (stitchGauge != null) {
+    return '$stitchGauge sts';
+  }
+
+  if (rowGauge != null) {
+    return '$rowGauge rows';
+  }
+
+  return null;
+}
+
+List<YarnFiberContent> _fiberContentsFromJson(Map<dynamic, dynamic> json) {
+  final rawFibers =
+      json['fibers'] ??
+          json['fiber_contents'] ??
+          json['yarn_fibers'] ??
+          json['fiber_types'];
+
   if (rawFibers is List) {
     return rawFibers
         .whereType<Map>()
         .map((fiber) {
-          return YarnFiberContent(
-            fiber: _string(fiber['name']) ?? '',
-            percentage:
-                _int(fiber['percentage']) ??
-                _int(fiber['percent']) ??
-                _int(fiber['value']) ??
-                0,
-          );
-        })
+      final fiberName =
+          _string(fiber['name']) ??
+              _string(fiber['fiber']) ??
+              _string(fiber['fiber_name']) ??
+              _nestedString(fiber['fiber'], 'name') ??
+              _nestedString(fiber['fiber_type'], 'name') ??
+              _nestedString(fiber['type'], 'name');
+
+      return YarnFiberContent(
+        fiber: fiberName ?? '',
+        percentage:
+        _int(fiber['percentage']) ??
+            _int(fiber['percent']) ??
+            _int(fiber['value']) ??
+            _int(fiber['amount']) ??
+            0,
+      );
+    })
         .where((fiber) => fiber.fiber.trim().isNotEmpty && fiber.percentage > 0)
         .toList(growable: false);
   }
 
   final summary =
-      _string(json['fiber_content']) ?? _string(json['fiber_content_summary']);
+      _string(json['fiber_content']) ??
+          _string(json['fiber_content_summary']) ??
+          _string(json['fiber_contents']) ??
+          _string(json['fiber']);
+
   if (summary == null) return const [];
 
   final fibers = <YarnFiberContent>[];
+
   for (final part in summary.split(',')) {
     final match = RegExp(r'^\s*(\d+)\s*%\s*(.+?)\s*$').firstMatch(part);
     if (match == null) continue;
