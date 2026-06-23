@@ -82,9 +82,9 @@ class RavelryYarnCatalogItem {
           _needleSizeSummary(json['needle_sizes']) ??
           _needleSizeSummary(json['needles']) ??
           _needleSizeRange(json),
-      gauge: _string(json['gauge']) ??
+      gauge: _gaugeSummary(json) ??
           _string(json['gauge_description']) ??
-          _gaugeSummary(json),
+          _string(json['gauge']),
       imageUrl:
           _photoUrl(json['first_photo']) ??
           _photoUrl(_firstListItem(json['photos'])),

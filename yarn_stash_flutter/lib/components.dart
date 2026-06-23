@@ -842,6 +842,7 @@ class YarnPhoto extends StatelessWidget {
     required this.height,
     this.radius = 20,
     this.fallbackColor = AppColors.rose,
+    this.fit = BoxFit.cover,
   });
 
   final String url;
@@ -849,17 +850,25 @@ class YarnPhoto extends StatelessWidget {
   final double height;
   final double radius;
   final Color fallbackColor;
+  final BoxFit fit;
 
   @override
   Widget build(BuildContext context) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(radius),
-      child: SizedBox(
-        width: width,
-        height: height,
-        child: Image.network(
-          url,
-          fit: BoxFit.cover,
+    final imageUrl = url.trim();
+
+    return SizedBox(
+      width: width,
+      height: height,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(radius),
+        child: imageUrl.isEmpty
+            ? _YarnPhotoFallback(color: fallbackColor)
+            : Image.network(
+          imageUrl,
+          width: width,
+          height: height,
+          fit: fit,
+          alignment: Alignment.center,
           loadingBuilder: (context, child, progress) {
             if (progress == null) return child;
             return _YarnPhotoFallback(color: fallbackColor);
@@ -867,6 +876,126 @@ class YarnPhoto extends StatelessWidget {
           errorBuilder: (context, error, stackTrace) {
             return _YarnPhotoFallback(color: fallbackColor);
           },
+        ),
+      ),
+    );
+  }
+}
+
+class PhotoSlideshow extends StatefulWidget {
+  const PhotoSlideshow({
+    super.key,
+    required this.imageUrls,
+    required this.fallbackColor,
+    this.width = double.infinity,
+    this.height = 256,
+    this.radius = 34,
+    this.fit = BoxFit.cover,
+  });
+
+  final List<String> imageUrls;
+  final Color fallbackColor;
+  final double width;
+  final double height;
+  final double radius;
+  final BoxFit fit;
+
+  @override
+  State<PhotoSlideshow> createState() => _PhotoSlideshowState();
+}
+
+class _PhotoSlideshowState extends State<PhotoSlideshow> {
+  late final PageController _pageController;
+  int _currentPage = 0;
+
+  List<String> get _validImageUrls => widget.imageUrls
+      .map((url) => url.trim())
+      .where((url) => url.isNotEmpty)
+      .toList(growable: false);
+
+  @override
+  void initState() {
+    super.initState();
+    _pageController = PageController();
+  }
+
+  @override
+  void didUpdateWidget(covariant PhotoSlideshow oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final imageCount = _validImageUrls.length;
+    if (_currentPage >= imageCount) {
+      _currentPage = imageCount <= 1 ? 0 : imageCount - 1;
+    }
+  }
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final imageUrls = _validImageUrls;
+
+    if (imageUrls.length <= 1) {
+      return YarnPhoto(
+        url: imageUrls.isEmpty ? '' : imageUrls.first,
+        width: widget.width,
+        height: widget.height,
+        radius: widget.radius,
+        fallbackColor: widget.fallbackColor,
+        fit: widget.fit,
+      );
+    }
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(widget.radius),
+      child: SizedBox(
+        width: widget.width,
+        height: widget.height,
+        child: Stack(
+          children: [
+            PageView.builder(
+              controller: _pageController,
+              itemCount: imageUrls.length,
+              onPageChanged: (page) => setState(() => _currentPage = page),
+              itemBuilder: (context, index) {
+                return YarnPhoto(
+                  url: imageUrls[index],
+                  width: widget.width,
+                  height: widget.height,
+                  radius: 0,
+                  fallbackColor: widget.fallbackColor,
+                  fit: widget.fit,
+                );
+              },
+            ),
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 12,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  for (var index = 0; index < imageUrls.length; index++)
+                    AnimatedContainer(
+                      duration: const Duration(milliseconds: 180),
+                      curve: Curves.easeOut,
+                      width: _currentPage == index ? 18 : 7,
+                      height: 7,
+                      margin: const EdgeInsets.symmetric(horizontal: 3),
+                      decoration: BoxDecoration(
+                        color: _currentPage == index
+                            ? Colors.white
+                            : Colors.white.withValues(alpha: 0.55),
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -937,7 +1066,7 @@ class UploadBox extends StatelessWidget {
             FaIcon(FontAwesomeIcons.camera, color: AppColors.accent, size: 24),
             SizedBox(height: 8),
             Text(
-              'Add images (optional)',
+              'Add images (Up to 8)',
               style: TextStyle(
                 color: AppColors.accent,
                 fontSize: 14,

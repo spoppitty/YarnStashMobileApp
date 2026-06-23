@@ -18,7 +18,12 @@ import 'data/repositories/user_repository.dart';
 import 'data/repositories/yarn_repository.dart';
 import 'data/services/auth_service.dart';
 
+import 'dart:io';
+import 'package:image_picker/image_picker.dart';
+import 'data/services/yarn_image_storage_service.dart';
+
 const _imgMerino = 'https://source.unsplash.com/420x420/?merino,yarn,skein';
+const _maxYarnImageCount = 8;
 
 const _allStashFilter = 'All';
 const _colorFamilyOptions = [
@@ -2032,8 +2037,6 @@ class _YarnDetailContent extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final imageUrl = yarn.imageUrls.isEmpty ? '' : yarn.imageUrls.first;
-
     return ListView(
       padding: const EdgeInsets.only(bottom: 28),
       children: [
@@ -2048,12 +2051,10 @@ class _YarnDetailContent extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 16),
-        YarnPhoto(
-          url: imageUrl,
-          width: double.infinity,
-          height: 256,
-          radius: 34,
+        PhotoSlideshow(
+          imageUrls: yarn.imageUrls,
           fallbackColor: _fallbackColorForYarn(yarn),
+          fit: BoxFit.contain,
         ),
         const SizedBox(height: 20),
         Row(
@@ -2517,9 +2518,16 @@ class _YarnFormScreenState extends State<YarnFormScreen> {
   String? _selectedFolderId;
   Yarn? _editingYarn;
   String? _populatedYarnId;
-  String _selectedImageUrl = '';
+  final List<String> _selectedImageUrls = [];
+  late final TextEditingController _imageUrlController;
   bool _isSaving = false;
   String? _errorMessage;
+
+  final _imagePicker = ImagePicker();
+  final _imageStorage = YarnImageStorageService();
+
+  final List<File> _selectedImageFiles = [];  String? _existingImageUrl;
+  bool _isUploadingImage = false;
 
   @override
   void initState() {
@@ -2541,6 +2549,7 @@ class _YarnFormScreenState extends State<YarnFormScreen> {
     _ballsController = TextEditingController();
     _priceController = TextEditingController();
     _notesController = TextEditingController();
+    _imageUrlController = TextEditingController();
 
     if (widget.isEditing) {
       _replaceFiberRows([_FiberContentInput()]);
@@ -2562,7 +2571,8 @@ class _YarnFormScreenState extends State<YarnFormScreen> {
       if (widget.isEditing) {
         _editingYarn = null;
         _populatedYarnId = null;
-        _selectedImageUrl = '';
+        _selectedImageUrls.clear();
+        _imageUrlController.clear();
         _colorFamily = null;
         _folder = 'No folder';
         _selectedFolderId = null;
@@ -2593,14 +2603,179 @@ class _YarnFormScreenState extends State<YarnFormScreen> {
     return trimmed.isEmpty ? null : trimmed;
   }
 
+  int get _selectedImageCount {
+    return _selectedImageUrls.length + _selectedImageFiles.length;
+  }
+
   List<String> _imageUrlsForSave() {
-    final imageUrl = _selectedImageUrl.trim();
+    return _selectedImageUrls
+        .map((url) => url.trim())
+        .where((url) => url.isNotEmpty)
+        .take(_maxYarnImageCount)
+        .toList(growable: false);
+  }
+
+  void _addImageUrl() {
+    final imageUrl = _imageUrlController.text.trim();
 
     if (imageUrl.isEmpty) {
-      return const [];
+      setState(() {
+        _errorMessage = 'Enter an image URL before adding it.';
+      });
+      return;
     }
 
-    return [imageUrl];
+    if (_selectedImageUrls.length >= _maxYarnImageCount) {
+      setState(() {
+        _errorMessage = 'You can add up to $_maxYarnImageCount images.';
+      });
+      return;
+    }
+
+    if (_selectedImageUrls.contains(imageUrl)) {
+      setState(() {
+        _errorMessage = 'This image has already been added.';
+      });
+      return;
+    }
+
+    setState(() {
+      _selectedImageUrls.add(imageUrl);
+      _imageUrlController.clear();
+      _errorMessage = null;
+    });
+  }
+
+  void _removeImageUrl(int index) {
+    setState(() {
+      _selectedImageUrls.removeAt(index);
+    });
+  }
+
+  void _removeSelectedImageFile(int index) {
+    setState(() {
+      _selectedImageFiles.removeAt(index);
+    });
+  }
+
+  Future<void> _deleteStorageImageIfPossible(String imageUrl) async {
+    if (imageUrl.trim().isEmpty) return;
+
+    try {
+      await _imageStorage.deleteImageByUrl(imageUrl);
+    } catch (_) {
+      // Ignore delete failures because some images may be external URLs
+      // like Ravelry, Unsplash, or pasted web image URLs.
+    }
+  }
+
+  String get _coverImageUrl {
+    return _selectedImageUrls.isEmpty ? '' : _selectedImageUrls.first;
+  }
+
+  Widget _imagePickerField() {
+    final canAddMore = _selectedImageCount < _maxYarnImageCount;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 8),
+
+        GestureDetector(
+          onTap: _isSaving || !canAddMore ? null : _pickImage,
+          child: Container(
+            height: 96,
+            width: double.infinity,
+            decoration: BoxDecoration(
+              color: AppColors.cream,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: AppColors.line,
+                width: 1.5,
+              ),
+            ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                FaIcon(
+                  FontAwesomeIcons.camera,
+                  color: canAddMore ? AppColors.accent : AppColors.muted,
+                  size: 24,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  canAddMore ? 'Add image' : 'Image limit reached',
+                  style: TextStyle(
+                    color: canAddMore ? AppColors.accent : AppColors.muted,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: tightLetterSpacing,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+
+        const SizedBox(height: 8),
+
+        Text(
+          '$_selectedImageCount / $_maxYarnImageCount images',
+          style: const TextStyle(
+            color: AppColors.muted,
+            fontSize: 12,
+            fontWeight: FontWeight.w800,
+            letterSpacing: tightLetterSpacing,
+          ),
+        ),
+
+        if (_selectedImageUrls.isNotEmpty || _selectedImageFiles.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              for (var index = 0; index < _selectedImageUrls.length; index++)
+                _SelectedImagePreview(
+                  imageUrl: _selectedImageUrls[index],
+                  fallbackColor: widget.startBlank
+                      ? AppColors.cream
+                      : const Color(0xFFB8D6E8),
+                  onRemove: () => _removeImageUrl(index),
+                ),
+
+              for (var index = 0; index < _selectedImageFiles.length; index++)
+                _SelectedLocalImagePreview(
+                  imageFile: _selectedImageFiles[index],
+                  onRemove: () => _removeSelectedImageFile(index),
+                ),
+            ],
+          ),
+        ],
+      ],
+    );
+  }
+
+  Future<void> _pickImage() async {
+    if (_selectedImageCount >= _maxYarnImageCount) {
+      setState(() {
+        _errorMessage = 'You can add up to $_maxYarnImageCount images.';
+      });
+      return;
+    }
+
+    final pickedImage = await _imagePicker.pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 80,
+      maxWidth: 1200,
+    );
+
+    if (pickedImage == null) return;
+
+    setState(() {
+      _selectedImageFiles.add(File(pickedImage.path));
+      _errorMessage = null;
+    });
   }
 
   String _optionalIntInputText(int? value, String suffix) {
@@ -2765,8 +2940,15 @@ class _YarnFormScreenState extends State<YarnFormScreen> {
     final seedExampleYarn = catalogYarn == null && seedCatalogYarn;
     _editingYarn = null;
     _populatedYarnId = null;
-    _selectedImageUrl =
-        catalogYarn?.imageUrl ?? (seedExampleYarn ? _imgMerino : '');
+    _selectedImageUrls
+      ..clear()
+      ..addAll([
+        if ((catalogYarn?.imageUrl ?? '').trim().isNotEmpty)
+          catalogYarn!.imageUrl!.trim()
+        else if (seedExampleYarn)
+          _imgMerino,
+      ]);
+    _imageUrlController.clear();
     _colorFamily = seedExampleYarn ? 'White' : null;
     _folder = 'No folder';
     _selectedFolderId = null;
@@ -2836,7 +3018,15 @@ class _YarnFormScreenState extends State<YarnFormScreen> {
 
     _editingYarn = yarn;
     _populatedYarnId = yarn.id;
-    _selectedImageUrl = yarn.imageUrls.isEmpty ? '' : yarn.imageUrls.first;
+    _selectedImageUrls
+      ..clear()
+      ..addAll(
+        yarn.imageUrls
+            .map((url) => url.trim())
+            .where((url) => url.isNotEmpty)
+            .take(_maxYarnImageCount),
+      );
+    _imageUrlController.clear();
     _colorFamily = _cleanText(yarn.colorFamily);
     _folder = _cleanText(yarn.folderName) ?? 'No folder';
     _selectedFolderId = yarn.folderIds.isEmpty ? null : yarn.folderIds.first;
@@ -3111,6 +3301,10 @@ class _YarnFormScreenState extends State<YarnFormScreen> {
         nextFolderIds: const [],
       );
 
+      for (final imageUrl in editingYarn.imageUrls) {
+        await _deleteStorageImageIfPossible(imageUrl);
+      }
+
       await _yarnRepository.deleteYarn(
         uid: editingYarn.ownerUid,
         collectionId: editingYarn.collectionId,
@@ -3134,6 +3328,13 @@ class _YarnFormScreenState extends State<YarnFormScreen> {
         setState(() => _isSaving = false);
       }
     }
+  }
+
+  List<String> _mergeUploadedImageUrl(String uploadedUrl, List<String> existingUrls) {
+    return [
+      uploadedUrl,
+      ...existingUrls.where((url) => url != uploadedUrl),
+    ].take(_maxYarnImageCount).toList(growable: false);
   }
 
   Future<void> _saveYarn(List<StashFolder> folders) async {
@@ -3180,6 +3381,21 @@ class _YarnFormScreenState extends State<YarnFormScreen> {
           return;
         }
 
+        var imageUrlsToSave = _imageUrlsForSave();
+
+        for (final imageFile in _selectedImageFiles) {
+          final uploadedImageUrl = await _imageStorage.uploadYarnImage(
+            uid: widget.userId,
+            yarnId: editingYarn.id,
+            imageFile: imageFile,
+          );
+
+          imageUrlsToSave = _mergeUploadedImageUrl(
+            uploadedImageUrl,
+            imageUrlsToSave,
+          );
+        }
+
         await _yarnRepository.updateYarn(
           Yarn(
             id: editingYarn.id,
@@ -3205,14 +3421,21 @@ class _YarnFormScreenState extends State<YarnFormScreen> {
                 : editingYarn.status == YarnStatus.usedUp
                 ? YarnStatus.inStash
                 : editingYarn.status,
-            imageUrls: editingYarn.imageUrls,
+            imageUrls: imageUrlsToSave,
             folderName: folderName,
             folderIds: folderIds,
             notes: _trimmedOrNull(_notesController.text),
             createdAt: editingYarn.createdAt,
-            updatedAt: editingYarn.updatedAt,
+            updatedAt: now,
           ),
         );
+
+        for (final oldImageUrl in editingYarn.imageUrls) {
+          if (!imageUrlsToSave.contains(oldImageUrl)) {
+            await _deleteStorageImageIfPossible(oldImageUrl);
+          }
+        }
+
         await _folderRepository.syncYarnMembership(
           uid: editingYarn.ownerUid,
           collectionId: editingYarn.collectionId,
@@ -3221,6 +3444,8 @@ class _YarnFormScreenState extends State<YarnFormScreen> {
           nextFolderIds: folderIds,
         );
       } else {
+        final initialImageUrls = _imageUrlsForSave();
+
         final createdYarn = await _yarnRepository.createYarn(
           uid: widget.userId,
           yarn: Yarn(
@@ -3243,7 +3468,7 @@ class _YarnFormScreenState extends State<YarnFormScreen> {
             skeinCount: skeinCount,
             priceCents: _parsePriceCents(_priceController.text),
             status: isUsedUpFolder ? YarnStatus.usedUp : YarnStatus.inStash,
-            imageUrls: _imageUrlsForSave(),
+            imageUrls: initialImageUrls,
             folderName: folderName,
             folderIds: folderIds,
             notes: _trimmedOrNull(_notesController.text),
@@ -3251,6 +3476,54 @@ class _YarnFormScreenState extends State<YarnFormScreen> {
             updatedAt: now,
           ),
         );
+
+        var updatedImageUrls = initialImageUrls;
+
+        for (final imageFile in _selectedImageFiles) {
+          final uploadedImageUrl = await _imageStorage.uploadYarnImage(
+            uid: widget.userId,
+            yarnId: createdYarn.id,
+            imageFile: imageFile,
+          );
+
+          updatedImageUrls = _mergeUploadedImageUrl(
+            uploadedImageUrl,
+            updatedImageUrls,
+          );
+        }
+
+        if (_selectedImageFiles.isNotEmpty) {
+          await _yarnRepository.updateYarn(
+            Yarn(
+              id: createdYarn.id,
+              ownerUid: createdYarn.ownerUid,
+              collectionId: createdYarn.collectionId,
+              brandName: createdYarn.brandName,
+              name: createdYarn.name,
+              colorway: createdYarn.colorway,
+              colorFamily: createdYarn.colorFamily,
+              dyeLot: createdYarn.dyeLot,
+              weightCategory: createdYarn.weightCategory,
+              wpi: createdYarn.wpi,
+              fiberContent: createdYarn.fiberContent,
+              fiberContents: createdYarn.fiberContents,
+              yardage: createdYarn.yardage,
+              unitWeightGrams: createdYarn.unitWeightGrams,
+              needleSize: createdYarn.needleSize,
+              gauge: createdYarn.gauge,
+              skeinCount: createdYarn.skeinCount,
+              priceCents: createdYarn.priceCents,
+              status: createdYarn.status,
+              imageUrls: updatedImageUrls,
+              folderName: createdYarn.folderName,
+              folderIds: createdYarn.folderIds,
+              notes: createdYarn.notes,
+              createdAt: createdYarn.createdAt,
+              updatedAt: DateTime.now(),
+            ),
+          );
+        }
+
         await _folderRepository.syncYarnMembership(
           uid: createdYarn.ownerUid,
           collectionId: createdYarn.collectionId,
@@ -3415,7 +3688,7 @@ class _YarnFormScreenState extends State<YarnFormScreen> {
           child: Row(
             children: [
               YarnPhoto(
-                url: _selectedImageUrl,
+                url: _coverImageUrl,
                 width: widget.isEditing ? 80 : 96,
                 height: widget.isEditing ? 80 : 96,
                 radius: widget.isEditing ? 22 : 24,
@@ -3526,9 +3799,10 @@ class _YarnFormScreenState extends State<YarnFormScreen> {
           ),
         ),
         const SizedBox(height: 12),
-        const InfoField(
+        InfoField(
           label: 'Images',
-          child: Column(children: [SizedBox(height: 8), UploadBox()]),
+          minHeight: 120,
+          child: _imagePickerField(),
         ),
         if (_errorMessage != null) ...[
           const SizedBox(height: 12),
@@ -3595,6 +3869,7 @@ class _YarnFormScreenState extends State<YarnFormScreen> {
     _ballsController.dispose();
     _priceController.dispose();
     _notesController.dispose();
+    _imageUrlController.dispose();
     for (final fiberRow in _fiberRows) {
       fiberRow.dispose();
     }
@@ -3684,6 +3959,108 @@ class _YarnFormScreenState extends State<YarnFormScreen> {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _SelectedImagePreview extends StatelessWidget {
+  const _SelectedImagePreview({
+    required this.imageUrl,
+    required this.fallbackColor,
+    required this.onRemove,
+  });
+
+  final String imageUrl;
+  final Color fallbackColor;
+  final VoidCallback onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        YarnPhoto(
+          url: imageUrl,
+          width: 72,
+          height: 72,
+          radius: 18,
+          fallbackColor: fallbackColor,
+        ),
+        Positioned(
+          top: -7,
+          right: -7,
+          child: GestureDetector(
+            onTap: onRemove,
+            child: Container(
+              width: 24,
+              height: 24,
+              decoration: BoxDecoration(
+                color: AppColors.ink,
+                shape: BoxShape.circle,
+                border: Border.all(color: AppColors.card, width: 2),
+              ),
+              child: const Center(
+                child: FaIcon(
+                  FontAwesomeIcons.xmark,
+                  color: Colors.white,
+                  size: 11,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _SelectedLocalImagePreview extends StatelessWidget {
+  const _SelectedLocalImagePreview({
+    required this.imageFile,
+    required this.onRemove,
+  });
+
+  final File imageFile;
+  final VoidCallback onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(18),
+          child: Image.file(
+            imageFile,
+            width: 72,
+            height: 72,
+            fit: BoxFit.cover,
+          ),
+        ),
+        Positioned(
+          top: -7,
+          right: -7,
+          child: GestureDetector(
+            onTap: onRemove,
+            child: Container(
+              width: 24,
+              height: 24,
+              decoration: BoxDecoration(
+                color: AppColors.ink,
+                shape: BoxShape.circle,
+                border: Border.all(color: AppColors.card, width: 2),
+              ),
+              child: const Center(
+                child: FaIcon(
+                  FontAwesomeIcons.xmark,
+                  color: Colors.white,
+                  size: 11,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -5705,7 +6082,7 @@ class _YarnGridCard extends StatelessWidget {
           YarnPhoto(
             url: imageUrl,
             width: double.infinity,
-            height: 132,
+            height: 118,
             radius: 22,
             fallbackColor: fallbackColor,
           ),
