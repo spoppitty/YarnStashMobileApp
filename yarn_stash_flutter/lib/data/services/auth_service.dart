@@ -5,6 +5,7 @@ import '../models/app_user.dart';
 import '../repositories/stash_collection_repository.dart';
 import '../repositories/stash_folder_repository.dart';
 import '../repositories/user_repository.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 
 class UserProfileUpdateResult {
   const UserProfileUpdateResult({required this.emailVerificationSent});
@@ -73,6 +74,21 @@ class AuthService {
     return credential;
   }
 
+  Future<UserCredential> signInWithGoogle() async {
+    await GoogleSignIn.instance.initialize(
+      serverClientId: "939927765385-416j2ncs5fqnvt0c7kqnggsfjpq3vjrp.apps.googleusercontent.com",
+    );
+
+    final googleUser = await GoogleSignIn.instance.authenticate();
+    final googleAuth = googleUser.authentication;
+
+    final credential = GoogleAuthProvider.credential(
+      idToken: googleAuth.idToken,
+    );
+
+    return FirebaseAuth.instance.signInWithCredential(credential);
+  }
+
   Future<void> sendPasswordResetEmail(String email) {
     return _firebaseAuth.sendPasswordResetEmail(email: email.trim());
   }
@@ -133,8 +149,9 @@ class AuthService {
     );
   }
 
-  Future<void> signOut() {
-    return _firebaseAuth.signOut();
+  Future<void> signOut() async {
+    await GoogleSignIn.instance.signOut();
+    await FirebaseAuth.instance.signOut();
   }
 
   Future<void> ensureSignedInUserProfile() async {

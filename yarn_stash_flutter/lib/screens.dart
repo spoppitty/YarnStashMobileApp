@@ -458,6 +458,37 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
+  Future<void> _signInWithGoogle() async {
+    if (_isSubmitting) return;
+    FocusScope.of(context).unfocus();
+
+    setState(() {
+      _isSubmitting = true;
+      _errorMessage = null;
+    });
+
+    try {
+      await widget.authService.signInWithGoogle();
+      await widget.authService.ensureSignedInUserProfile();
+
+      if (!mounted) return;
+      widget.onLogin();
+    } on FirebaseAuthException catch (error) {
+      if (!mounted) return;
+      setState(() => _errorMessage = _authErrorMessage(error));
+    } catch (error, stackTrace) {
+      debugPrint('Google sign-in failed: $error');
+      debugPrintStack(stackTrace: stackTrace);
+
+      if (!mounted) return;
+      setState(() => _errorMessage = 'Google sign-in failed: $error');
+    } finally {
+      if (mounted) {
+        setState(() => _isSubmitting = false);
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Form(
@@ -536,9 +567,10 @@ class _LoginScreenState extends State<LoginScreen> {
           const SizedBox(height: 24),
           const _AuthDivider(),
           const SizedBox(height: 20),
-          const SecondaryButton(
-            label: 'Continue with Google',
+          SecondaryButton(
+            label: _isSubmitting ? 'Opening Google...' : 'Continue with Google',
             icon: FontAwesomeIcons.google,
+            onTap: _isSubmitting ? null : _signInWithGoogle,
           ),
           const SizedBox(height: 24),
           _AuthSwitchLine(
@@ -629,6 +661,37 @@ class _SignUpScreenState extends State<SignUpScreen> {
     }
   }
 
+  Future<void> _signInWithGoogle() async {
+    if (_isSubmitting) return;
+    FocusScope.of(context).unfocus();
+
+    setState(() {
+      _isSubmitting = true;
+      _errorMessage = null;
+    });
+
+    try {
+      await widget.authService.signInWithGoogle();
+      await widget.authService.ensureSignedInUserProfile();
+
+      if (!mounted) return;
+      widget.onCreateAccount();
+    } on FirebaseAuthException catch (error) {
+      if (!mounted) return;
+      setState(() => _errorMessage = _authErrorMessage(error));
+    } catch (error, stackTrace) {
+      debugPrint('Google sign-in failed: $error');
+      debugPrintStack(stackTrace: stackTrace);
+
+      if (!mounted) return;
+      setState(() => _errorMessage = 'Google sign-in failed: $error');
+    } finally {
+      if (mounted) {
+        setState(() => _isSubmitting = false);
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Form(
@@ -706,9 +769,10 @@ class _SignUpScreenState extends State<SignUpScreen> {
           const SizedBox(height: 24),
           const _AuthDivider(),
           const SizedBox(height: 20),
-          const SecondaryButton(
-            label: 'Sign up with Google',
+          SecondaryButton(
+            label: _isSubmitting ? 'Opening Google...' : 'Sign up with Google',
             icon: FontAwesomeIcons.google,
+            onTap: _isSubmitting ? null : _signInWithGoogle,
           ),
           const SizedBox(height: 24),
           _AuthSwitchLine(
@@ -4381,7 +4445,9 @@ class FolderDetailScreen extends StatelessWidget {
             collectionId: collectionId,
             folderId: folder.id,
           );
-          if (context.mounted) onBack();
+
+          onBack();
+          return;
       }
     } catch (_) {
       if (!context.mounted) return;

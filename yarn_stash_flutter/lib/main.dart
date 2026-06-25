@@ -298,7 +298,13 @@ class _YarnStashRootState extends State<YarnStashRoot> {
         userId: user!.uid,
         collectionId: _authService.defaultStashCollectionId,
         folderId: _selectedFolderId,
-        onBack: () => _go(AppScreen.folders),
+        onBack: () {
+          setState(() {
+            _selectedFolderId = null;
+            _screen = AppScreen.folders;
+            _currentTab = 2;
+          });
+        },
         onYarnTap: (yarn) => _openYarnDetail(AppScreen.folderDetail, yarn),
       ),
       AppScreen.profile => ProfileScreen(
