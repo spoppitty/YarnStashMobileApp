@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -15,13 +16,27 @@ import 'data/services/auth_service.dart';
 import 'firebase_options.dart';
 import 'screens.dart';
 
+const _appIconAsset = 'assets/YarnStashAppIconDarker.png';
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  _setDefaultSystemUi();
+  runApp(const YarnStashApp());
+}
+
+Future<void> _initializeAppServices() async {
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   await FirebaseAppCheck.instance.activate(
-    androidProvider: AndroidProvider.debug,
-    appleProvider: AppleProvider.debug,
+    providerAndroid: kReleaseMode
+        ? const AndroidPlayIntegrityProvider()
+        : const AndroidDebugProvider(),
+    providerApple: kReleaseMode
+        ? const AppleAppAttestWithDeviceCheckFallbackProvider()
+        : const AppleDebugProvider(),
   );
+}
+
+void _setDefaultSystemUi() {
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
       statusBarColor: AppColors.bg,
@@ -31,11 +46,17 @@ Future<void> main() async {
       systemNavigationBarIconBrightness: Brightness.dark,
     ),
   );
-  runApp(const YarnStashApp());
 }
 
-class YarnStashApp extends StatelessWidget {
+class YarnStashApp extends StatefulWidget {
   const YarnStashApp({super.key});
+
+  @override
+  State<YarnStashApp> createState() => _YarnStashAppState();
+}
+
+class _YarnStashAppState extends State<YarnStashApp> {
+  late final Future<void> _initialization = _initializeAppServices();
 
   @override
   Widget build(BuildContext context) {
@@ -43,7 +64,20 @@ class YarnStashApp extends StatelessWidget {
       title: 'Yarn Stash',
       debugShowCheckedModeBanner: false,
       theme: buildAppTheme(),
-      home: const YarnStashRoot(),
+      home: FutureBuilder<void>(
+        future: _initialization,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState != ConnectionState.done) {
+            return const YarnLaunchLoadingScreen();
+          }
+
+          if (snapshot.hasError) {
+            return const YarnLaunchErrorScreen();
+          }
+
+          return const YarnStashRoot();
+        },
+      ),
     );
   }
 }
@@ -277,7 +311,7 @@ class _YarnStashRootState extends State<YarnStashRoot> {
         isEditing: true,
         userId: user!.uid,
         collectionId:
-        _selectedYarnCollectionId ?? _authService.defaultStashCollectionId,
+            _selectedYarnCollectionId ?? _authService.defaultStashCollectionId,
         yarnId: _selectedYarnId,
         onBack: () => _go(AppScreen.yarnDetail),
         onPrimary: () => _go(AppScreen.yarnDetail),
@@ -333,14 +367,7 @@ class _YarnStashRootState extends State<YarnStashRoot> {
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting &&
             snapshot.data == null) {
-          return PhoneScaffold(
-            showTabs: false,
-            currentTab: 0,
-            onTabSelected: _selectTab,
-            child: const Center(
-              child: CircularProgressIndicator(color: AppColors.accent),
-            ),
-          );
+          return const YarnLaunchLoadingScreen();
         }
 
         final user = snapshot.data;
@@ -354,6 +381,78 @@ class _YarnStashRootState extends State<YarnStashRoot> {
           child: _buildScreen(screen, user),
         );
       },
+    );
+  }
+}
+
+class YarnLaunchLoadingScreen extends StatelessWidget {
+  const YarnLaunchLoadingScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final shortestSide = MediaQuery.sizeOf(context).shortestSide;
+    final iconSize = shortestSide < 360 ? 112.0 : 132.0;
+
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: const SystemUiOverlayStyle(
+        statusBarColor: AppColors.launchBrown,
+        statusBarIconBrightness: Brightness.light,
+        statusBarBrightness: Brightness.dark,
+        systemNavigationBarColor: AppColors.launchBrown,
+        systemNavigationBarIconBrightness: Brightness.light,
+      ),
+      child: Scaffold(
+        backgroundColor: AppColors.launchBrown,
+        body: SafeArea(
+          child: Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Image.asset(_appIconAsset, width: iconSize, height: iconSize),
+                const SizedBox(height: 24),
+                const Text(
+                  'Stashing your yarn...',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: AppColors.cream,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: tightLetterSpacing,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class YarnLaunchErrorScreen extends StatelessWidget {
+  const YarnLaunchErrorScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return const Scaffold(
+      backgroundColor: AppColors.launchBrown,
+      body: SafeArea(
+        child: Center(
+          child: Padding(
+            padding: EdgeInsets.all(24),
+            child: Text(
+              'Yarn Stash could not finish starting. Please try again.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: AppColors.cream,
+                fontSize: 16,
+                fontWeight: FontWeight.w800,
+                letterSpacing: tightLetterSpacing,
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

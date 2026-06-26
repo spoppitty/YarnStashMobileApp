@@ -16,6 +16,7 @@ abstract final class AppColors {
   static const lavenderSoft = Color(0xFFE7DDF6);
   static const taupeSoft = Color(0xFFEADFD5);
   static const danger = Color(0xFFB0453B);
+  static const launchBrown = Color(0xFFA25E44);
 }
 
 ThemeData buildAppTheme() {

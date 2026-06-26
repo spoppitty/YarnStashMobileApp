@@ -24,6 +24,7 @@ import 'data/services/yarn_image_storage_service.dart';
 
 const _imgMerino = 'https://source.unsplash.com/420x420/?merino,yarn,skein';
 const _maxYarnImageCount = 8;
+const _usernameCharacterLimit = 20;
 
 const _allStashFilter = 'All';
 const _colorFamilyOptions = [
@@ -297,6 +298,17 @@ String? _requiredAuthValue(String? value, String label) {
   if (value == null || value.trim().isEmpty) {
     return '$label is required';
   }
+  return null;
+}
+
+String? _usernameValidator(String? value) {
+  final requiredMessage = _requiredAuthValue(value, 'Username');
+  if (requiredMessage != null) return requiredMessage;
+
+  if (value!.trim().length > _usernameCharacterLimit) {
+    return 'Username must be $_usernameCharacterLimit characters or fewer';
+  }
+
   return null;
 }
 
@@ -644,7 +656,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
       await widget.authService.createUserWithEmailAndPassword(
         email: _emailController.text,
         password: _passwordController.text,
-        displayName: _usernameController.text,
+        displayName: _usernameController.text.trim(),
       );
       if (!mounted) return;
       widget.onCreateAccount();
@@ -713,7 +725,8 @@ class _SignUpScreenState extends State<SignUpScreen> {
             controller: _usernameController,
             hintText: 'Your name',
             textInputAction: TextInputAction.next,
-            validator: (value) => _requiredAuthValue(value, 'Username'),
+            validator: _usernameValidator,
+            maxLength: _usernameCharacterLimit,
             enabled: !_isSubmitting,
           ),
           const SizedBox(height: 12),
@@ -2590,8 +2603,7 @@ class _YarnFormScreenState extends State<YarnFormScreen> {
   final _imagePicker = ImagePicker();
   final _imageStorage = YarnImageStorageService();
 
-  final List<File> _selectedImageFiles = [];  String? _existingImageUrl;
-  bool _isUploadingImage = false;
+  final List<File> _selectedImageFiles = [];
 
   @override
   void initState() {
@@ -2677,37 +2689,6 @@ class _YarnFormScreenState extends State<YarnFormScreen> {
         .where((url) => url.isNotEmpty)
         .take(_maxYarnImageCount)
         .toList(growable: false);
-  }
-
-  void _addImageUrl() {
-    final imageUrl = _imageUrlController.text.trim();
-
-    if (imageUrl.isEmpty) {
-      setState(() {
-        _errorMessage = 'Enter an image URL before adding it.';
-      });
-      return;
-    }
-
-    if (_selectedImageUrls.length >= _maxYarnImageCount) {
-      setState(() {
-        _errorMessage = 'You can add up to $_maxYarnImageCount images.';
-      });
-      return;
-    }
-
-    if (_selectedImageUrls.contains(imageUrl)) {
-      setState(() {
-        _errorMessage = 'This image has already been added.';
-      });
-      return;
-    }
-
-    setState(() {
-      _selectedImageUrls.add(imageUrl);
-      _imageUrlController.clear();
-      _errorMessage = null;
-    });
   }
 
   void _removeImageUrl(int index) {
@@ -5869,7 +5850,7 @@ class _AccountSettingsDialogState extends State<AccountSettingsDialog> {
 
     try {
       final result = await widget.authService.updateSignedInUserProfile(
-        displayName: _usernameController.text,
+        displayName: _usernameController.text.trim(),
         email: _emailController.text,
       );
       if (!mounted) return;
@@ -5956,7 +5937,8 @@ class _AccountSettingsDialogState extends State<AccountSettingsDialog> {
               label: 'Username',
               controller: _usernameController,
               textInputAction: TextInputAction.next,
-              validator: (value) => _requiredAuthValue(value, 'Username'),
+              validator: _usernameValidator,
+              maxLength: _usernameCharacterLimit,
               enabled: !_isSaving && !_isSendingReset,
             ),
             const SizedBox(height: 12),

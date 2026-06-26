@@ -674,6 +674,7 @@ class AuthField extends StatelessWidget {
     this.validator,
     this.suffixIcon,
     this.enabled = true,
+    this.maxLength,
   });
 
   final String label;
@@ -687,6 +688,7 @@ class AuthField extends StatelessWidget {
   final FormFieldValidator<String>? validator;
   final Widget? suffixIcon;
   final bool enabled;
+  final int? maxLength;
 
   @override
   Widget build(BuildContext context) {
@@ -714,6 +716,7 @@ class AuthField extends StatelessWidget {
             textInputAction: textInputAction,
             onFieldSubmitted: onFieldSubmitted,
             validator: validator,
+            maxLength: maxLength,
             cursorColor: AppColors.accent,
             style: const TextStyle(
               color: AppColors.ink,
@@ -723,6 +726,7 @@ class AuthField extends StatelessWidget {
             ),
             decoration: InputDecoration(
               hintText: hintText,
+              counterText: maxLength == null ? null : '',
               hintStyle: const TextStyle(
                 color: AppColors.muted,
                 fontWeight: FontWeight.w800,
