@@ -4943,8 +4943,8 @@ class _ProfileStats {
       usedUpCount: yarns
           .where((yarn) => yarn.status == YarnStatus.usedUp)
           .length,
-      fiberRows: _topProgressRows(_fiberBreakdown(activeYarns), maxRows: 4),
-      weightRows: _topProgressRows(_weightBreakdown(activeYarns), maxRows: 4),
+      fiberRows: _topProgressRows(_fiberBreakdown(activeYarns), maxRows: 10),
+      weightRows: _topProgressRows(_weightBreakdown(activeYarns), maxRows: 10),
       statusRows: _topProgressRows(_statusBreakdown(activeYarns), maxRows: 4),
     );
   }
